@@ -30,8 +30,7 @@ class Driver:
         self.frame += 1
         page = self.frame // FRAMES_PER_PAGE - 1
         if page == 0 and not self.app.user:
-            self.app.username, self.app.password = "loson", "treadmill"
-            self.app.sign_in()
+            self.app.work_offline()
         if 0 <= page < len(PAGES):
             self.app.page = PAGES[page][0]
             if self.app.page not in self.pages_seen:
@@ -48,7 +47,7 @@ def test_every_page_renders(tmp_path, monkeypatch):
     idl.ensure_assets()
     app = Lab4App(Settings(mount_root=str(tmp_path / "mount"), destinations=[["/archive/x", "test"]]))
     app.sources = [str(tmp_path / "data.tif")]
-    app.recording.subject = "M231"
+    app.recording.subject_id = "M231"
     driver = Driver(app)
 
     params = hello_imgui.RunnerParams()
@@ -65,14 +64,38 @@ def test_every_page_renders(tmp_path, monkeypatch):
         pytest.skip(f"null backend unavailable: {e}")
     app.executor.shutdown(wait=True)
 
-    assert app.user == "loson"
+    assert app.user == "offline"
     assert driver.pages_seen == [key for key, *_ in PAGES]
     assert app.status == ""
 
 
-def test_wrong_password_stays_signed_out(tmp_path, monkeypatch):
+def test_sign_in_without_credentials_stays_signed_out(tmp_path, monkeypatch):
     monkeypatch.setenv("IMGUI_LAB4_HOME", str(tmp_path))
     app = Lab4App(Settings())
-    app.username, app.password = "loson", "nope"
     app.sign_in()
-    assert app.user == "" and app.error_login and app.password == ""
+    assert app.user == "" and "cannot read" in app.error_login and "sign_in" not in app.futures
+
+
+def test_one_detected_mount_fills_an_unset_root(tmp_path, monkeypatch):
+    from concurrent.futures import wait
+
+    from imgui_lab4_interface.storage import Mount
+
+    monkeypatch.setenv("IMGUI_LAB4_HOME", str(tmp_path))
+    found = [Mount("Y:\\", r"\\sshfs.kr\me@host!2216\biohpc")]
+    monkeypatch.setattr("imgui_lab4_interface.app.find_mounts", lambda base: found)
+    app = Lab4App(Settings())
+    wait(list(app.futures.values()))
+    app.poll()
+    assert app.settings.mount_root == "Y:\\"
+
+    kept = Lab4App(Settings(mount_root="Q:\\"))
+    wait(list(kept.futures.values()))
+    kept.poll()
+    assert kept.settings.mount_root == "Q:\\" and kept.mounts == found
+
+    found.append(Mount("Z:\\", "me@other:/biohpc"))
+    ambiguous = Lab4App(Settings())
+    wait(list(ambiguous.futures.values()))
+    ambiguous.poll()
+    assert ambiguous.settings.mount_root == ""

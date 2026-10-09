@@ -26,3 +26,6 @@ htmlcov/
 
 # imgui runtime
 *.ini
+
+# local dev database (scripts/dev_db.py)
+.dev/

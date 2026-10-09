@@ -8,12 +8,10 @@ from typing import Optional
 
 BACKENDS = ("mounted", "ssh")
 
-# placeholders carried over from the pml_utilities BioHPC widget; edit them on the Storage page
 DESTINATIONS = [
-    ["/archive/mbo/raw", "Raw acquisitions, long-term archive"],
-    ["/archive/mbo/assembled", "Assembled volumes (zarr / tiff)"],
-    ["/scratch/mbo/suite2p", "Suite2p outputs, fast scratch"],
-    ["/work/mbo/shared", "Shared lab working set"],
+    ["/biohpc/data2", "BioHPC data2"],
+    ["/biohpc/data3", "BioHPC data3"],
+    ["/biohpc/data4", "BioHPC data4"],
 ]
 
 
@@ -32,7 +30,8 @@ class Settings:
 
     Attributes:
         backend (str): "mounted" for a share mounted on this machine, "ssh" for a host reached over ssh
-        mount_root (str): The local folder BioHPC paths resolve under when mounted
+        mount_root (str): The local folder the share is mounted at
+        mount_base (str): The BioHPC path mount_root shows, e.g. /biohpc for a drive mapped to /biohpc
         ssh_host (str): An ssh alias or user@host whose keys are already set up
         destinations (list): [path, description] pairs offered on the Transfer page
         command_mbo (str): The mbo executable, a name on PATH or a full path
@@ -41,6 +40,7 @@ class Settings:
 
     backend: str = "mounted"
     mount_root: str = ""
+    mount_base: str = "/biohpc"
     ssh_host: str = "biohpc"
     destinations: list = dataclasses.field(default_factory=lambda: [list(d) for d in DESTINATIONS])
     command_mbo: str = "mbo"

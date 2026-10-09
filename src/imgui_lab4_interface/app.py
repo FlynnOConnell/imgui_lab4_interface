@@ -4,6 +4,7 @@ like the masknmf launcher on imgui_data_loader's dialog. Storage calls run on wo
 ssh link never stalls a frame.
 """
 
+import copy
 import json
 import posixpath
 import shutil
@@ -17,10 +18,11 @@ from imgui_bundle import hello_imgui, imgui, imgui_ctx, immapp
 from imgui_bundle import icons_fontawesome_6 as fa
 from imgui_bundle import portable_file_dialogs as pfd
 
-from imgui_lab4_interface import __version__, auth, lab4, viewers
+from imgui_lab4_interface import __version__, lab4, viewers
 from imgui_lab4_interface.catalog import KINDS, Catalog
 from imgui_lab4_interface.config import BACKENDS, Settings, data_dir
-from imgui_lab4_interface.storage import SIDECAR_SUFFIX, Entry, Transfer, open_storage, write_text
+from imgui_lab4_interface.database import BIOHPC, Credentials, Lab4Database, Schema, secrets_path
+from imgui_lab4_interface.storage import SIDECAR_SUFFIX, Entry, Mount, Transfer, destination_state, find_mounts, open_storage, write_text
 
 ACCENT = imgui.ImVec4(0.40, 0.68, 1.00, 1.0)
 KEY = imgui.ImVec4(1.00, 0.80, 0.20, 1.0)
@@ -53,16 +55,14 @@ SIZE_WINDOW = (1040, 720)
 WIDTH_RAIL_EM = 13
 WIDTH_CAPTION_EM = 9
 WIDTH_LOGIN_EM = 22
-CUSTOM = "Custom path..."
+TITLE_PICKER = "Choose destination"
 
 # the rail: a page key, its icon, its name, and the line under the name on its page
 PAGES = (
     ("home", fa.ICON_FA_HOUSE, "Overview", "what this window does and where data lands"),
     ("transfer", fa.ICON_FA_CLOUD_ARROW_UP, "Transfer", "copy files or folders into a BioHPC folder, metadata beside them"),
-    ("metadata", fa.ICON_FA_TAGS, "Metadata", "the Lab4 recording identity and notes that travel with the data"),
     ("browse", fa.ICON_FA_SITEMAP, "Browse storage", "look through BioHPC folders, catalog them, open datasets and attach metadata"),
-    ("find", fa.ICON_FA_MAGNIFYING_GLASS, "Find data", "search the catalog of scanned folders and open a dataset in mbo or masknmf"),
-    ("storage", fa.ICON_FA_SERVER, "Storage", "how this machine reaches BioHPC: a mounted share or ssh"),
+    ("settings", fa.ICON_FA_GEAR, "Settings", "how this machine reaches BioHPC, where data goes, and what opens it"),
 )
 # the files a transfer writes
 FILES = (
@@ -85,6 +85,11 @@ def draw_hint(text: str) -> None:
     imgui.text_disabled("(?)")
     if imgui.is_item_hovered():
         idl.wrapped_tooltip(text)
+
+
+def is_recording_data(path: str) -> bool:
+    """Whether path is the kind of file Lab4 registers as a recording's data: the .h5 lab4.convert writes."""
+    return path.lower().endswith((".h5", ".hdf5"))
 
 
 def summarize(kinds: dict) -> str:
@@ -116,10 +121,14 @@ class Lab4App:
     def __init__(self, settings: Optional[Settings] = None):
         self.settings = settings or Settings.load()
         self.storage = open_storage(self.settings)
+        # the Lab4 database user once signed in, or "offline"
         self.user = ""
-        self.username = ""
-        self.password = ""
         self.error_login = ""
+        self.db: Optional[Lab4Database] = None
+        self.schema: Optional[Schema] = None
+        self.subject_recordings: list[dict] = []
+        # folders on this machine showing the mount base, None until looked for
+        self.mounts: Optional[list[Mount]] = None
         self.page = "home"
         # None while a check runs or before the first, "" once reached, else why not
         self.status: Optional[str] = None
@@ -127,9 +136,16 @@ class Lab4App:
         self.message = ""
         self.failed = False
         self.sources: list[str] = []
-        self.index_dest = 0
-        self.custom_dest = ""
-        self.subfolder = ""
+        self.dest = self.settings.destinations[0][0] if self.settings.destinations else ""
+        # the destination last checked, and what the check found: "exists", "new", or why it cannot be used
+        self.dest_checked = ""
+        self.dest_state: Optional[str] = None
+        # the destination picker: the folder it lists, its subfolders, the one picked, and whether to open it
+        self.picker_path = ""
+        self.picker_entries: list[Entry] = []
+        self.picker_error = ""
+        self.picker_selected = ""
+        self.picker_open = False
         self.overwrite = False
         self.attach = True
         self.recording = lab4.Recording()
@@ -143,13 +159,6 @@ class Lab4App:
         # what the catalog knows of the browse folder: its summary, the scan covering it, and its items by name
         self.described: dict = {"folder": None, "scan": None, "items": {}}
         self.count_scanned = 0
-        self.query = ""
-        self.query_kind = ""
-        self.results: list[dict] = []
-        self.result: Optional[dict] = None
-        self.text_sql = "SELECT kind, count(*) AS n, sum(size) AS bytes FROM datasets GROUP BY kind ORDER BY n DESC"
-        self.table_sql: tuple[list, list] = ([], [])
-        self.error_sql = ""
         self.executor = ThreadPoolExecutor(max_workers=3)
         self.futures: dict[str, Future] = {}
         self.picker = None
@@ -167,25 +176,70 @@ class Lab4App:
             on_cancel=self.quit,
         )
         self.dialog = idl.FileDialog(self.config)
+        self.detect_mounts()
+
+    def detect_mounts(self) -> None:
+        self.mounts = None
+        self.submit("mounts", find_mounts, self.settings.mount_base)
+
+    def use_mount(self, mount: Mount) -> None:
+        self.settings.backend = "mounted"
+        self.settings.mount_root = mount.root
+        if self.user:
+            self.connect()
 
     def sign_in(self) -> None:
-        if not auth.sign_in(username=self.username, password=self.password):
-            self.error_login = "Invalid credentials."
-            self.password = ""
-            return
-        self.user = self.username.strip()
-        self.password = ""
+        """Sign in to Lab4 with the credentials file on a worker; poll lands it."""
         self.error_login = ""
-        if self.user in lab4.EXPERIMENTERS:
-            self.recording.experimenter = self.user
+        try:
+            self.db = Lab4Database(Credentials.load(secrets_path()))
+        except (OSError, ValueError, KeyError) as e:
+            self.error_login = f"cannot read {secrets_path()}: {e}"
+            return
+        self.submit("sign_in", self.db.schema)
+
+    def work_offline(self) -> None:
+        """Open the window without Lab4: transfers and sidecars work, registering does not."""
+        self.db = None
+        self.schema = None
+        self.user = "offline"
         self.connect()
 
     def sign_out(self) -> None:
         if self.transfer is not None:
             self.transfer.cancelled = True
         self.user = ""
+        self.db = None
+        self.schema = None
         self.page = "home"
         self.message = ""
+
+    def register_problems(self, path: str) -> list[str]:
+        """What keeps path from being registered as the recording's data."""
+        found = []
+        if self.schema is None:
+            found.append("sign in to Lab4 to register; this window is offline")
+        if "register" in self.futures:
+            found.append("a registration is running")
+        if not path.startswith(f"{BIOHPC}/"):
+            found.append(f"Lab4 only stores paths under {BIOHPC}")
+        if not is_recording_data(path):
+            found.append("a recording's data is the .h5 lab4.convert writes")
+        found += self.recording.problems()
+        if self.schema is not None:
+            found += self.schema.problems(self.recording)
+        return found
+
+    def register(self, path: str) -> None:
+        self.message = ""
+        self.submit("register", self.db.register, self.schema, copy.deepcopy(self.recording), path)
+
+    def look_up_subject(self) -> None:
+        """List the subject's recordings already in Lab4."""
+        subject = self.recording.subject_id.strip()
+        self.subject_recordings = []
+        if self.db is not None and self.schema is not None and subject in self.schema.subjects:
+            self.submit("subject", self.db.recordings, subject)
 
     def quit(self) -> None:
         if self.transfer is not None:
@@ -202,7 +256,7 @@ class Lab4App:
         self.status = None
         self.submit("check", self.storage.check)
         self.browse(path=self.path_browse)
-        self.search()
+        self.dest_checked = ""
 
     def browse(self, path: str) -> None:
         self.path_browse = path.rstrip("/") or "/"
@@ -220,9 +274,6 @@ class Lab4App:
 
     def count_scan(self, n: int) -> None:
         self.count_scanned = n
-
-    def search(self) -> None:
-        self.submit("search", self.catalog.search, self.storage.label, self.query, self.query_kind)
 
     def open_dataset(self, path: str, kind: str) -> None:
         """Start the viewer kind calls for on path, reporting the outcome in the footer."""
@@ -253,7 +304,33 @@ class Lab4App:
                 continue
             del self.futures[name]
             error = future.exception()
-            if name == "check":
+            if name == "mounts":
+                self.mounts = [] if error is not None else future.result()
+                unset = self.settings.backend == "mounted" and not self.settings.mount_root.strip()
+                if unset and len(self.mounts) == 1:
+                    self.use_mount(self.mounts[0])
+            elif name == "sign_in":
+                if error is None:
+                    self.schema = future.result()
+                    self.user = self.schema.user
+                    self.connect()
+                else:
+                    self.db = None
+                    self.error_login = f"Lab4 refused the sign-in: {error}"
+            elif name == "refresh" and error is None:
+                self.schema = future.result()
+                self.look_up_subject()
+            elif name == "subject":
+                self.subject_recordings = [] if error is not None else future.result()
+            elif name == "register":
+                if error is None:
+                    added = [table.replace("_", " ") for table, new in future.result().items() if new and table != "recording"]
+                    self.message = f"registered {self.recording.label()} in Lab4" + (f", with a new {', '.join(added)}" if added else "")
+                    self.submit("refresh", self.db.schema)
+                else:
+                    self.message = f"registering failed: {error}"
+                self.failed = error is not None
+            elif name == "check":
                 self.status = "" if error is None else str(error)
             elif name == "list":
                 self.entries = [] if error is not None else future.result()
@@ -268,12 +345,6 @@ class Lab4App:
                 self.message = f"scan failed: {error}" if found is None else f"catalogued {found['datasets']} datasets in {found['records']} items under {found['root']} ({found['seconds']:.1f} s)"
                 self.failed = found is None
                 self.describe()
-                self.search()
-            elif name == "search":
-                self.results = [] if error is not None else future.result()
-            elif name == "sql":
-                self.table_sql = ([], []) if error is not None else future.result()
-                self.error_sql = "" if error is None else str(error)
             elif name == "sidecar":
                 self.sidecar = "" if error is not None else future.result()
             elif name == "attach":
@@ -283,9 +354,17 @@ class Lab4App:
             elif name == "transfer":
                 self.message = f"sent {len(self.transfer.sources)} item(s) to {self.transfer.dest}" if error is None else str(error)
                 self.failed = error is not None
+                self.dest_checked = ""
                 if error is None:
                     self.transfer = None
                     self.browse(path=self.path_browse)
+            elif name == "dest_check":
+                _, state = (None, str(error)) if error is not None else future.result()
+                if self.dest_checked == self.destination():
+                    self.dest_state = state
+            elif name == "picker":
+                self.picker_entries = [] if error is not None else [e for e in future.result() if e.is_dir]
+                self.picker_error = "" if error is None else str(error)
         if self.picker is not None and self.picker.ready():
             chosen = self.picker.result()
             chosen = chosen if isinstance(chosen, list) else [chosen]
@@ -305,15 +384,29 @@ class Lab4App:
             self.picker = pfd.open_file("Add files", start, ["All Files", "*"], pfd.opt.multiselect)
 
     def destination(self) -> str:
-        """The BioHPC folder a transfer lands in: the preset or custom folder, then the subfolder."""
-        if self.index_dest < len(self.settings.destinations):
-            base = self.settings.destinations[self.index_dest][0]
-        else:
-            base = self.custom_dest.strip()
-        if not base.strip("/"):
-            return ""
-        sub = self.subfolder.strip().strip("/")
-        return f"{base.rstrip('/')}/{sub}" if sub else base.rstrip("/")
+        """The BioHPC folder a transfer lands in, as typed or picked."""
+        dest = self.dest.strip()
+        return dest.rstrip("/") or dest
+
+    def check_destination(self) -> None:
+        """Ask the storage whether the destination exists or would be made, once per destination."""
+        dest = self.destination()
+        if dest.startswith("/") and dest != self.dest_checked and "dest_check" not in self.futures:
+            self.dest_checked = dest
+            self.dest_state = None
+            self.submit("dest_check", destination_state, self.storage, dest)
+
+    def list_picker(self, path: str) -> None:
+        self.picker_path = path.rstrip("/") or "/"
+        self.picker_selected = ""
+        self.submit("picker", self.storage.listdir, self.picker_path)
+
+    def open_destination_picker(self) -> None:
+        """Open the picker at the destination, or at the folder a new destination would be made in."""
+        dest = self.destination()
+        start = dest if self.dest_state == "exists" else posixpath.dirname(dest) if dest.startswith("/") else ""
+        self.list_picker(start or (self.settings.destinations[0][0] if self.settings.destinations else "/"))
+        self.picker_open = True
 
     def problems(self) -> list[str]:
         """What keeps the page's action from running."""
@@ -326,15 +419,17 @@ class Lab4App:
             if not self.sources:
                 found.append("add a file or folder to send")
             found += [f"{s} is not on this machine" for s in self.sources if not Path(s).exists()]
-            if not self.destination():
+            dest = self.destination()
+            if not dest:
                 found.append("choose a destination folder")
+            elif not dest.startswith("/"):
+                found.append("the destination is a BioHPC path, e.g. /biohpc/data2/M231")
+            elif self.dest_checked != dest or self.dest_state is None:
+                found.append("checking the destination")
+            elif self.dest_state not in ("exists", "new"):
+                found.append(self.dest_state)
             if self.attach:
                 found += self.recording.problems()
-        elif self.page == "find":
-            if self.result is None:
-                found.append("select a dataset to open")
-            elif self.storage.local_path(self.result["path"]) is None:
-                found.append("opening needs the share mounted on this machine; ssh only lists it")
         elif self.page == "browse":
             if not self.selected:
                 found.append("select a file or folder to attach metadata to")
@@ -348,10 +443,8 @@ class Lab4App:
             return f"{fa.ICON_FA_CLOUD_ARROW_UP}  Send {len(self.sources)} item{'' if len(self.sources) == 1 else 's'}"
         if self.page == "browse":
             return f"{fa.ICON_FA_TAGS}  Attach metadata"
-        if self.page == "storage":
-            return f"{fa.ICON_FA_PLUG}  Save and connect"
-        if self.page == "find":
-            return f"{fa.ICON_FA_EYE}  Open in {KINDS[self.result['kind']][0] if self.result else 'viewer'}"
+        if self.page == "settings":
+            return f"{fa.ICON_FA_FLOPPY_DISK}  Save"
         return None
 
     def act(self) -> None:
@@ -365,11 +458,10 @@ class Lab4App:
             path = f"{self.path_browse.rstrip('/')}/{self.selected}{SIDECAR_SUFFIX}"
             text = json.dumps({**self.recording.sidecar(user=self.user), "source": f"{self.path_browse.rstrip('/')}/{self.selected}"}, indent=2)
             self.submit("attach", write_text, self.storage, path, text)
-        elif self.page == "storage":
+        elif self.page == "settings":
             self.settings.save()
             self.connect()
-        elif self.page == "find":
-            self.open_dataset(path=self.result["path"], kind=self.result["kind"])
+            self.message = f"saved to {data_dir() / 'settings.json'}"
 
     def draw_header(self) -> None:
         """The name and version, who is signed in and whether storage answers, then what this does."""
@@ -384,6 +476,8 @@ class Lab4App:
         if self.user:
             if self.status is None:
                 color, state = DIM, "checking"
+            elif self.settings.backend == "mounted" and not self.settings.mount_root.strip():
+                color, state = WARN, "not set up"
             elif self.status:
                 color, state = ERROR, "unreachable"
             else:
@@ -394,7 +488,8 @@ class Lab4App:
             imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + max(0.0, room))
             imgui.text_colored(color, text)
             if imgui.is_item_hovered():
-                idl.wrapped_tooltip(f"{self.storage.label}: {self.status}" if self.status else self.storage.label)
+                lab = f"Lab4: {self.db.credentials.label()}" if self.db else "Lab4: offline"
+                idl.wrapped_tooltip(f"{lab}\n{self.storage.label}" + (f": {self.status}" if self.status else ""))
         draw_wrapped("PML data onto BioHPC storage, with its Lab4 metadata beside it", DIM)
 
     def draw_body(self) -> None:
@@ -420,7 +515,7 @@ class Lab4App:
         imgui.pop_style_var()
 
     def draw_login(self) -> None:
-        """A centered card: username, password, Sign In."""
+        """A centered card: the credentials file and who it signs in as, Sign In, or work offline."""
         em = imgui.get_font_size()
         imgui.dummy(imgui.ImVec2(0, 3 * em))
         avail = imgui.get_content_region_avail().x
@@ -432,33 +527,40 @@ class Lab4App:
         flags = imgui.ChildFlags_.borders | imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.always_use_window_padding
         with imgui_ctx.begin_child("##login", imgui.ImVec2(width, 0), flags, imgui.WindowFlags_.no_scrollbar):
             idl.center_text(f"{fa.ICON_FA_LOCK}  Lab4 · BioHPC sign in", ACCENT)
-            idl.center_text("move data and attach metadata", DIM)
+            idl.center_text("move data, attach metadata, register recordings", DIM)
             imgui.dummy(imgui.ImVec2(0, 0.3 * em))
             imgui.separator()
             imgui.dummy(imgui.ImVec2(0, 0.3 * em))
             full = imgui.get_content_region_avail().x
-            imgui.text_colored(DIM, f"{fa.ICON_FA_USER}  Username")
-            imgui.set_next_item_width(full)
-            if imgui.is_window_appearing():
-                imgui.set_keyboard_focus_here()
-            _, self.username = imgui.input_text_with_hint("##user", "username", self.username)
-            imgui.text_colored(DIM, f"{fa.ICON_FA_LOCK}  Password")
-            imgui.set_next_item_width(full)
-            flags_password = imgui.InputTextFlags_.password | imgui.InputTextFlags_.enter_returns_true
-            entered, self.password = imgui.input_text_with_hint("##password", "password", self.password, flags_password)
+            path = secrets_path()
+            imgui.text_colored(DIM, f"{fa.ICON_FA_KEY}  Credentials")
+            draw_wrapped(str(path), PATH if path.is_file() else ERROR)
+            if not path.is_file():
+                draw_wrapped("Sign in to the Lab4 website, download your credentials and save them here.", DIM)
+            else:
+                try:
+                    credentials = Credentials.load(path)
+                except (OSError, ValueError, KeyError) as e:
+                    draw_wrapped(f"unreadable: {e}", ERROR)
+                else:
+                    local = credentials.host in ("127.0.0.1", "localhost", "::1")
+                    draw_wrapped(f"signs in as {credentials.label()}" + ("" if local else "  (remote server)"), DIM if local else WARN)
             if self.error_login:
                 draw_wrapped(f"{fa.ICON_FA_CIRCLE_EXCLAMATION}  {self.error_login}", ERROR)
             imgui.dummy(imgui.ImVec2(0, 0.4 * em))
-            ready = bool(self.username.strip()) and bool(self.password)
-            imgui.begin_disabled(not ready)
+            signing_in = "sign_in" in self.futures
+            imgui.begin_disabled(signing_in or not path.is_file())
             idl.push_button_style(THEME, primary=True)
-            clicked = imgui.button("Sign In", imgui.ImVec2(full, 1.9 * em))
+            if imgui.button("Signing in..." if signing_in else "Sign In", imgui.ImVec2(full, 1.9 * em)):
+                self.sign_in()
             idl.pop_button_style()
             imgui.end_disabled()
-            if clicked or (entered and ready):
-                self.sign_in()
-            imgui.dummy(imgui.ImVec2(0, 0.2 * em))
-            idl.center_text(f"demo login:  {auth.DEMO_USER}  /  {auth.DEMO_PASSWORD}", DIM)
+            imgui.begin_disabled(signing_in)
+            if imgui.button("Work offline", imgui.ImVec2(full, 1.7 * em)):
+                self.work_offline()
+            imgui.end_disabled()
+            if imgui.is_item_hovered():
+                idl.wrapped_tooltip("transfers and sidecars work without Lab4; registering a recording needs it")
         imgui.pop_style_var(2)
         imgui.pop_style_color()
 
@@ -512,14 +614,10 @@ class Lab4App:
             self.draw_home()
         elif key == "transfer":
             self.draw_transfer()
-        elif key == "metadata":
-            self.draw_metadata()
         elif key == "browse":
             self.draw_browse()
-        elif key == "find":
-            self.draw_find()
         else:
-            self.draw_storage()
+            self.draw_settings()
 
     def step(self, n: int, title: str, hint: str) -> None:
         """A numbered step heading with a (?) hint."""
@@ -562,12 +660,32 @@ class Lab4App:
         _, index = imgui.combo(label, items.index(value), items)
         return items[index]
 
+    def pick(self, label: str, value: str, items: list[str], hint: str = "") -> str:
+        """A text field, with a dropdown of items beside it that fills it when there are any."""
+        if not items:
+            return imgui.input_text_with_hint(label, hint, value)[1]
+        spacing = imgui.get_style().item_inner_spacing.x
+        imgui.set_next_item_width(imgui.get_content_region_avail().x - imgui.get_frame_height() - spacing)
+        _, value = imgui.input_text_with_hint(label, hint, value)
+        imgui.same_line(0, spacing)
+        if imgui.begin_combo(f"{label}_pick", "", imgui.ComboFlags_.no_preview | imgui.ComboFlags_.popup_align_left):
+            for item in items:
+                if imgui.selectable(item, item == value)[0]:
+                    value = item
+            imgui.end_combo()
+        return value
+
+    def lookup(self, label: str, value: str, column: str, hint: str) -> str:
+        """A combo over the column's Lab4 lookup values, or a text field offline."""
+        items = self.schema.choices.get(column, []) if self.schema else []
+        return self.choice(label, value, items) if items else imgui.input_text_with_hint(label, hint, value)[1]
+
     def draw_home(self) -> None:
         """Cards for the three things to do, then where data may go and what lands there."""
         em = imgui.get_font_size()
         w = imgui.get_content_region_avail().x
         gap = 1.0 * em
-        cards = [page for page in PAGES if page[0] in ("transfer", "metadata", "browse", "find")]
+        cards = [page for page in PAGES if page[0] in ("transfer", "browse")]
         width = (w - gap * (len(cards) - 1)) / len(cards)
         for i, (key, icon, name, hint) in enumerate(cards):
             if i:
@@ -576,16 +694,16 @@ class Lab4App:
                 self.page = key
         imgui.dummy(imgui.ImVec2(0, 0.6 * em))
         draw_wrapped(
-            "Fill in the recording on Metadata, pick files and a BioHPC folder on Transfer, and send: the data is copied "
-            "as is and a sidecar holding its Lab4 key lands beside it. Browse storage attaches the same sidecar to data "
-            "already on BioHPC, and its Scan catalogs a folder so Find data can search it and open what it finds in mbo "
-            "or masknmf.",
+            "On Transfer, pick files, a BioHPC folder and the recording's metadata, and send: the data is copied as is "
+            "and a sidecar holding its Lab4 key lands beside it. Browse storage attaches the same sidecar to data "
+            "already on BioHPC, registers a converted .h5 as the recording's data in Lab4, and opens datasets in mbo or "
+            "masknmf; its Scan catalogs a folder so each item shows what it holds.",
             DIM,
         )
         flags = imgui.TableFlags_.row_bg | imgui.TableFlags_.borders_inner_h
         imgui.dummy(imgui.ImVec2(0, 0.6 * em))
         imgui.text_colored(ACCENT, f"{fa.ICON_FA_FOLDER_OPEN}  Destinations")
-        draw_hint("edit these on the Storage page")
+        draw_hint("edit these in Settings")
         if imgui.begin_table("##destinations", 2, flags):
             imgui.table_setup_column("path", imgui.TableColumnFlags_.width_fixed, 15 * em)
             imgui.table_setup_column("holds", imgui.TableColumnFlags_.width_stretch)
@@ -636,32 +754,37 @@ class Lab4App:
         imgui.end_disabled()
 
         imgui.dummy(imgui.ImVec2(0, 0.6 * em))
-        self.step(2, "Destination", "a BioHPC folder; a subfolder is made when missing")
-        labels = [path for path, _ in self.settings.destinations] + [CUSTOM]
-        self.index_dest = min(self.index_dest, len(labels) - 1)
-        if self.begin_form("dest"):
-            self.row("folder")
-            _, self.index_dest = imgui.combo("##dest", self.index_dest, labels)
-            if self.index_dest < len(self.settings.destinations):
-                imgui.text_disabled(self.settings.destinations[self.index_dest][1])
-            else:
-                self.row("path")
-                _, self.custom_dest = imgui.input_text_with_hint("##custom", "/path/on/biohpc", self.custom_dest)
-            self.row("subfolder")
-            _, self.subfolder = imgui.input_text_with_hint("##sub", "optional", self.subfolder)
-            self.row("lands in")
-            draw_wrapped(self.destination() or "choose a folder", PATH if self.destination() else DIM)
-            imgui.end_table()
+        self.step(2, "Destination", "a BioHPC folder; one new folder is made when its parent exists")
+        self.check_destination()
+        dest = self.destination()
+        spacing = imgui.get_style().item_inner_spacing.x
+        label_browse = f"{fa.ICON_FA_FOLDER_OPEN}  Browse..."
+        imgui.set_next_item_width(imgui.get_content_region_avail().x - imgui.calc_text_size(label_browse).x - 2 * imgui.get_style().frame_padding.x - spacing)
+        _, self.dest = imgui.input_text_with_hint("##dest", "/biohpc/data2/... ; type a new folder's name to make it", self.dest)
+        imgui.same_line(0, spacing)
+        if imgui.button(label_browse):
+            self.open_destination_picker()
+        presets = {path.rstrip("/"): description for path, description in self.settings.destinations}
+        if not dest:
+            draw_wrapped("type a BioHPC folder or browse for one", DIM)
+        elif not dest.startswith("/") or self.dest_checked != dest:
+            pass
+        elif self.dest_state is None:
+            imgui.text_disabled("checking...")
+        elif self.dest_state == "exists":
+            draw_wrapped(f"{fa.ICON_FA_FOLDER}  lands in {dest}" + (f"  ·  {presets[dest]}" if dest in presets else ""), PATH)
+        elif self.dest_state == "new":
+            parent, name = posixpath.split(dest)
+            draw_wrapped(f"{fa.ICON_FA_PLUS}  {name} will be made in {parent or '/'}", ACCENT)
+        else:
+            draw_wrapped(f"{fa.ICON_FA_CIRCLE_EXCLAMATION}  {self.dest_state}", ERROR)
+        self.draw_destination_picker()
 
         imgui.dummy(imgui.ImVec2(0, 0.6 * em))
-        self.step(3, "Metadata", f"written as <name>{SIDECAR_SUFFIX} beside each source")
+        self.step(3, "Metadata", f"the recording this data belongs to, written as <name>{SIDECAR_SUFFIX} beside each source")
         _, self.attach = imgui.checkbox("Attach a metadata sidecar", self.attach)
         if self.attach:
-            imgui.same_line()
-            imgui.text_colored(KEY, self.recording.label())
-            imgui.same_line()
-            if imgui.small_button("edit"):
-                self.page = "metadata"
+            self.draw_recording()
         _, self.overwrite = imgui.checkbox("Overwrite what is already at the destination", self.overwrite)
 
         if self.transfer is not None:
@@ -679,42 +802,116 @@ class Lab4App:
                     self.transfer = None
                     self.message = ""
 
-    def draw_metadata(self) -> None:
-        """The recording's identity, acquisition and notes, extra fields, then the sidecar they make."""
+    def subsection(self, title: str, hint: str) -> None:
+        """A small heading inside a step, with a (?) hint."""
+        imgui.dummy(imgui.ImVec2(0, 0.3 * imgui.get_font_size()))
+        imgui.text_disabled(title.upper())
+        draw_hint(text=hint)
+
+    def draw_destination_picker(self) -> None:
+        """A modal listing BioHPC folders: shortcuts to the Settings destinations, double-click to enter, Use to pick."""
+        em = imgui.get_font_size()
+        if self.picker_open:
+            imgui.open_popup(TITLE_PICKER)
+            self.picker_open = False
+        imgui.set_next_window_size(imgui.ImVec2(44 * em, 28 * em), imgui.Cond_.appearing)
+        if not imgui.begin_popup_modal(TITLE_PICKER, None)[0]:
+            return
+        for path, description in self.settings.destinations:
+            if imgui.small_button(f"{path}##shortcut_{path}"):
+                self.list_picker(path)
+            if imgui.is_item_hovered() and description:
+                idl.wrapped_tooltip(description)
+            imgui.same_line()
+        imgui.new_line()
+        if imgui.button(f"{fa.ICON_FA_ARROW_UP}##picker_up"):
+            self.list_picker(posixpath.dirname(self.picker_path) or "/")
+        imgui.same_line()
+        imgui.set_next_item_width(-1)
+        entered, self.picker_path = imgui.input_text("##picker_path", self.picker_path, imgui.InputTextFlags_.enter_returns_true)
+        if entered:
+            self.list_picker(self.picker_path)
+        if "picker" in self.futures:
+            imgui.text_disabled("listing...")
+        elif self.picker_error:
+            draw_wrapped(self.picker_error, ERROR)
+        flags_row = imgui.SelectableFlags_.allow_double_click
+        if imgui.begin_child("##picker_list", imgui.ImVec2(0, -2.4 * em), imgui.ChildFlags_.borders):
+            for entry in self.picker_entries:
+                clicked, _ = imgui.selectable(f"{fa.ICON_FA_FOLDER}  {entry.name}", entry.name == self.picker_selected, flags_row)
+                if clicked:
+                    self.picker_selected = entry.name
+                if clicked and imgui.is_mouse_double_clicked(imgui.MouseButton_.left):
+                    self.list_picker(f"{self.picker_path.rstrip('/')}/{entry.name}")
+            if not self.picker_entries and "picker" not in self.futures and not self.picker_error:
+                imgui.text_disabled("no folders here")
+        imgui.end_child()
+        chosen = f"{self.picker_path.rstrip('/')}/{self.picker_selected}" if self.picker_selected else self.picker_path
+        idl.push_button_style(THEME, primary=True)
+        if imgui.button(f"Use {chosen}"):
+            self.dest = chosen
+            imgui.close_current_popup()
+        idl.pop_button_style()
+        imgui.same_line()
+        if imgui.button("Cancel"):
+            imgui.close_current_popup()
+        imgui.same_line()
+        imgui.text_disabled("to make a new folder, close this and type its name after the path")
+        imgui.end_popup()
+
+    def draw_recording(self) -> None:
+        """The recording's Lab4 key, its details, a new subject's fields, extra fields, and the sidecar they make."""
         em = imgui.get_font_size()
         rec = self.recording
-        self.step(1, "Recording", "the Lab4 DataJoint key this data registers under")
+        schema = self.schema
+        self.subsection("Recording", "the Lab4 key this data registers under: group, subject, session and device")
         if self.begin_form("key"):
             self.row("experimenter")
-            rec.experimenter = self.choice("##experimenter", rec.experimenter, lab4.EXPERIMENTERS)
+            rec.experimenter = self.lookup("##experimenter", rec.experimenter, "experimenter", "full name")
             self.row("experiment group")
-            _, rec.expt_group = imgui.input_text_with_hint("##group", "study / cohort", rec.expt_group)
+            groups = schema.groups_of(rec.experimenter.strip()) if schema else []
+            rec.collection_name = self.pick("##group", rec.collection_name, groups, "study / cohort; a new one is added")
             self.row("subject")
-            _, rec.subject = imgui.input_text_with_hint("##subject", "mouse id", rec.subject)
-            self.row("session date")
-            _, rec.session_date = imgui.input_text_with_hint("##date", "YYYY-MM-DD", rec.session_date)
-            self.row("recording #")
-            _, rec.recording_idx = imgui.input_int("##rec", rec.recording_idx)
-            rec.recording_idx = max(1, rec.recording_idx)
-            imgui.end_table()
-        for problem in rec.problems():
-            draw_wrapped(f"{fa.ICON_FA_CIRCLE_INFO}  {problem}", WARN)
-
-        imgui.dummy(imgui.ImVec2(0, 0.6 * em))
-        self.step(2, "Acquisition", "how the data was recorded")
-        if self.begin_form("acquisition"):
+            subject_before = rec.subject_id
+            rec.subject_id = self.pick("##subject", rec.subject_id, schema.subjects if schema else [], "mouse id")
+            if rec.subject_id != subject_before:
+                self.look_up_subject()
+            self.row("session start")
+            _, rec.session_datetime = imgui.input_text_with_hint("##when", "YYYY-MM-DD HH:MM", rec.session_datetime)
             self.row("device")
-            rec.device = self.choice("##device", rec.device, lab4.DEVICES)
-            self.row("indicator")
-            rec.indicator = self.choice("##indicator", rec.indicator, lab4.INDICATORS)
-            self.row("region")
-            rec.region = self.choice("##region", rec.region, lab4.REGIONS)
+            rec.device_name = self.lookup("##device", rec.device_name, "device_name", "rig")
+            imgui.end_table()
+        problems = rec.problems() + (schema.problems(rec) if schema else [])
+        for problem in problems:
+            draw_wrapped(f"{fa.ICON_FA_CIRCLE_INFO}  {problem}", WARN)
+        if schema is None:
+            draw_wrapped("offline: nothing here is checked against Lab4", DIM)
+        elif rec.subject_id.strip() in schema.subjects:
+            n = len(self.subject_recordings)
+            draw_wrapped(f"{rec.subject_id.strip()} is in Lab4 with {n} recording{'' if n == 1 else 's'}", DIM)
+            for row in self.subject_recordings[:5]:
+                imgui.text_disabled(f"    {row['session_datetime']}  {row['device_name']}  {row['data_path']}")
+
+        self.subsection("Details", "stored with the recording and its session")
+        if self.begin_form("details"):
+            self.row("label")
+            _, rec.ui_label = imgui.input_text_with_hint("##label", "optional", rec.ui_label)
+            self.row("weight (g)")
+            _, rec.weight_g = imgui.input_text_with_hint("##weight", "optional", rec.weight_g)
             self.row("notes")
             _, rec.notes = imgui.input_text_multiline("##notes", rec.notes, imgui.ImVec2(-1, 3.5 * em))
             imgui.end_table()
 
-        imgui.dummy(imgui.ImVec2(0, 0.6 * em))
-        self.step(3, "Extra fields", "any other key and value to keep with the data")
+        if schema is not None and rec.subject_id.strip() and rec.subject_id.strip() not in schema.subjects and schema.subject_fields():
+            self.subsection("New subject", f"{rec.subject_id.strip()} is not in Lab4 yet; registering adds it with these")
+            if self.begin_form("subject"):
+                for column in schema.subject_fields():
+                    self.row(column.name.replace("_", " ") + ("" if column.required else " (optional)"))
+                    value = rec.subject_fields.get(column.name, "")
+                    rec.subject_fields[column.name] = self.pick(f"##subject_{column.name}", value, schema.choices.get(column.name, []), "YYYY-MM-DD" if column.type == "date" else "")
+                imgui.end_table()
+
+        self.subsection("Extra fields", "any other key and value to keep with the data, in the sidecar only")
         remove = None
         for i, pair in enumerate(rec.extra):
             if imgui.small_button(f"{fa.ICON_FA_XMARK}##extra_{i}"):
@@ -730,14 +927,15 @@ class Lab4App:
         if imgui.button(f"{fa.ICON_FA_PLUS}  Add field"):
             rec.extra.append(["", ""])
 
-        imgui.dummy(imgui.ImVec2(0, 0.6 * em))
-        imgui.text_colored(ACCENT, f"{fa.ICON_FA_FILE_CODE}  {rec.label()}{SIDECAR_SUFFIX}")
-        draw_hint("what a transfer or an attach writes")
+        imgui.dummy(imgui.ImVec2(0, 0.3 * em))
+        if not imgui.tree_node(f"{fa.ICON_FA_FILE_CODE}  sidecar preview: {rec.label()}{SIDECAR_SUFFIX}###sidecar_preview"):
+            return
         text = json.dumps(rec.sidecar(user=self.user), indent=2)
         lines = text.count("\n") + 1
         imgui.push_style_color(imgui.Col_.text, CODE)
         imgui.input_text_multiline("##preview", text, imgui.ImVec2(-1, lines * imgui.get_text_line_height() + em), imgui.InputTextFlags_.read_only)
         imgui.pop_style_color()
+        imgui.tree_pop()
 
     def draw_browse(self) -> None:
         """
@@ -800,17 +998,18 @@ class Lab4App:
                 sidecar = entry.name.endswith(SIDECAR_SUFFIX)
                 if sidecar or kind is not None:
                     imgui.push_style_color(imgui.Col_.text, DIM if sidecar else KEY)
-                clicked, _ = imgui.selectable(f"{icon}  {entry.name}", entry.name == self.selected, imgui.SelectableFlags_.span_all_columns)
+                flags_row = imgui.SelectableFlags_.span_all_columns | imgui.SelectableFlags_.allow_double_click
+                clicked, _ = imgui.selectable(f"{icon}  {entry.name}", entry.name == self.selected, flags_row)
                 if sidecar or kind is not None:
                     imgui.pop_style_color()
                 if clicked:
                     self.select(name=entry.name)
                 if clicked and imgui.is_mouse_double_clicked(imgui.MouseButton_.left):
                     path = f"{self.path_browse.rstrip('/')}/{entry.name}"
-                    if kind is not None:
-                        self.open_dataset(path=path, kind=kind)
-                    elif entry.is_dir:
+                    if entry.is_dir:
                         self.browse(path=path)
+                    elif kind is not None:
+                        self.open_dataset(path=path, kind=kind)
                 imgui.table_next_column()
                 imgui.text_colored(KEY, kind or "")
                 imgui.table_next_column()
@@ -825,11 +1024,21 @@ class Lab4App:
                 if f"{entry.name}{SIDECAR_SUFFIX}" in names:
                     imgui.text_colored(OK, fa.ICON_FA_TAGS)
             imgui.end_table()
-        imgui.text_disabled("double-click a dataset to open it in its viewer, a folder to enter it")
+        imgui.text_disabled("double-click a folder to enter it, a dataset file to open it in its viewer")
 
         if self.selected:
             item = items.get(self.selected, {})
             imgui.text_colored(ACCENT, f"{fa.ICON_FA_TAGS}  {self.selected}")
+            path = f"{self.path_browse.rstrip('/')}/{self.selected}"
+            if is_recording_data(path) and not any(e.is_dir for e in self.entries if e.name == self.selected):
+                blockers = self.register_problems(path)
+                imgui.same_line()
+                imgui.begin_disabled(bool(blockers))
+                if imgui.small_button(f"{fa.ICON_FA_DATABASE}  Register in Lab4"):
+                    self.register(path)
+                imgui.end_disabled()
+                if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
+                    idl.wrapped_tooltip("\n".join(blockers) if blockers else f"add {self.recording.label()} to Lab4 with this as its data")
             if item.get("kind"):
                 tool, _, description = KINDS[item["kind"]]
                 imgui.same_line()
@@ -841,95 +1050,30 @@ class Lab4App:
                 imgui.text_disabled("reading metadata...")
             elif self.sidecar:
                 imgui.push_style_color(imgui.Col_.text, CODE)
-                imgui.input_text_multiline("##sidecar", self.sidecar, imgui.ImVec2(-1, -1), imgui.InputTextFlags_.read_only)
+                imgui.input_text_multiline("##sidecar", self.sidecar, imgui.ImVec2(-1, 10 * em), imgui.InputTextFlags_.read_only)
                 imgui.pop_style_color()
             else:
                 draw_wrapped(f"no metadata yet; Attach metadata writes {self.recording.label()} beside it", DIM)
+        imgui.dummy(imgui.ImVec2(0, 0.4 * em))
+        if imgui.collapsing_header(f"{fa.ICON_FA_TAGS}  Metadata to attach or register: {self.recording.label()}###browse_metadata"):
+            self.draw_recording()
 
-    def draw_find(self) -> None:
-        """A search over the catalog, its results table, then raw SQL over the same tables."""
-        em = imgui.get_font_size()
-        imgui.set_next_item_width(-12 * em)
-        changed, self.query = imgui.input_text_with_hint("##query", "words in the path or metadata, e.g. M231 2026-08 kind:mesc", self.query)
-        imgui.same_line()
-        imgui.set_next_item_width(-1)
-        kinds = ["any kind", *KINDS]
-        index = kinds.index(self.query_kind) if self.query_kind in kinds else 0
-        changed_kind, index = imgui.combo("##kind", index, kinds)
-        self.query_kind = "" if index == 0 else kinds[index]
-        if changed or changed_kind:
-            self.search()
-        if not self.results and not self.query and not self.query_kind:
-            draw_wrapped("Nothing catalogued for this storage yet: Scan a folder on Browse storage.", DIM)
-        else:
-            imgui.text_disabled(f"{len(self.results)} datasets{' (first 500)' if len(self.results) == 500 else ''}; double-click one to open it")
+    def draw_settings(self) -> None:
+        """One tab per group of settings; Save writes them all."""
+        if imgui.begin_tab_bar("##settings"):
+            for name, draw in (("Connection", self.draw_connection), ("Destinations", self.draw_destinations), ("Viewers", self.draw_viewers)):
+                if imgui.begin_tab_item(name)[0]:
+                    imgui.dummy(imgui.ImVec2(0, 0.3 * imgui.get_font_size()))
+                    draw()
+                    imgui.end_tab_item()
+            imgui.end_tab_bar()
+        imgui.dummy(imgui.ImVec2(0, 0.6 * imgui.get_font_size()))
+        draw_wrapped(f"Save writes every tab to {data_dir() / 'settings.json'}", DIM)
 
-        flags = imgui.TableFlags_.row_bg | imgui.TableFlags_.borders_inner_h | imgui.TableFlags_.scroll_y | imgui.TableFlags_.resizable
-        height = max(8 * em, imgui.get_content_region_avail().y - 6 * em)
-        if imgui.begin_table("##results", 5, flags, imgui.ImVec2(0, height)):
-            imgui.table_setup_scroll_freeze(0, 1)
-            imgui.table_setup_column("dataset", imgui.TableColumnFlags_.width_stretch, 2.0)
-            imgui.table_setup_column("kind", imgui.TableColumnFlags_.width_fixed, 8 * em)
-            imgui.table_setup_column("recording", imgui.TableColumnFlags_.width_stretch, 1.0)
-            imgui.table_setup_column("size", imgui.TableColumnFlags_.width_fixed, 5 * em)
-            imgui.table_setup_column("modified", imgui.TableColumnFlags_.width_fixed, 8 * em)
-            imgui.table_headers_row()
-            for i, row in enumerate(self.results):
-                imgui.table_next_row()
-                imgui.table_next_column()
-                selected = self.result is not None and self.result["path"] == row["path"]
-                clicked, _ = imgui.selectable(f"{row['name']}##result_{i}", selected, imgui.SelectableFlags_.span_all_columns)
-                hovered = imgui.is_item_hovered()
-                imgui.same_line()
-                imgui.text_disabled(posixpath.dirname(row["path"]))
-                if hovered:
-                    idl.wrapped_tooltip(row["path"])
-                if clicked:
-                    self.result = row
-                if clicked and imgui.is_mouse_double_clicked(imgui.MouseButton_.left):
-                    self.open_dataset(path=row["path"], kind=row["kind"])
-                imgui.table_next_column()
-                imgui.text_colored(KEY, row["kind"])
-                imgui.table_next_column()
-                imgui.text_disabled(row["recording"] or "")
-                imgui.table_next_column()
-                imgui.text_disabled(human_bytes(row["size"]) if row["size"] else "")
-                imgui.table_next_column()
-                imgui.text_disabled(format_time(row["mtime"]))
-            imgui.end_table()
-        if self.result is not None:
-            imgui.text_colored(PATH, self.result["path"])
-            imgui.same_line()
-            if imgui.small_button("show in Browse"):
-                self.page = "browse"
-                self.browse(path=posixpath.dirname(self.result["path"]))
-                self.selected = self.result["name"]
-
-        if imgui.collapsing_header("SQL"):
-            draw_wrapped("Read-only SQL over the catalog: datasets, folders, metadata (sidecars) and scans.", DIM)
-            _, self.text_sql = imgui.input_text_multiline("##sql", self.text_sql, imgui.ImVec2(-1, 3.5 * em))
-            if imgui.button(f"{fa.ICON_FA_PLAY}  Run"):
-                self.submit("sql", self.catalog.sql, self.text_sql)
-            if self.error_sql:
-                draw_wrapped(self.error_sql, ERROR)
-            columns, rows = self.table_sql
-            if columns and imgui.begin_table("##sql_rows", len(columns), flags, imgui.ImVec2(0, 12 * em)):
-                imgui.table_setup_scroll_freeze(0, 1)
-                for column in columns:
-                    imgui.table_setup_column(column)
-                imgui.table_headers_row()
-                for row in rows:
-                    imgui.table_next_row()
-                    for value in row:
-                        imgui.table_next_column()
-                        imgui.text("" if value is None else str(value))
-                imgui.end_table()
-
-    def draw_storage(self) -> None:
-        """The backend and how to reach it, then the destinations offered on Transfer."""
-        em = imgui.get_font_size()
+    def draw_connection(self) -> None:
+        """The backend and how to reach it, with the mounts found on this machine."""
         s = self.settings
-        self.step(1, "Connection", "nothing here signs in: a mounted share uses this machine's mount, ssh its keys")
+        draw_wrapped("Nothing here signs in: a mounted share uses this machine's mount, ssh its keys.", DIM)
         for backend, label in zip(BACKENDS, ("Mounted share", "SSH")):
             if imgui.radio_button(label, s.backend == backend):
                 s.backend = backend
@@ -938,20 +1082,42 @@ class Lab4App:
         if self.begin_form("connection"):
             if s.backend == "mounted":
                 self.row("mount root")
-                _, s.mount_root = imgui.input_text_with_hint("##root", r"e.g. Z:\ or \\lamella.biohpc.swmed.edu\share", s.mount_root)
+                _, s.mount_root = imgui.input_text_with_hint("##root", r"e.g. X:\ or \\lamella.biohpc.swmed.edu\share", s.mount_root)
+                self.row("shows")
+                _, s.mount_base = imgui.input_text_with_hint("##base", "the BioHPC folder the mount root is, e.g. /biohpc", s.mount_base)
             else:
                 self.row("host")
                 _, s.ssh_host = imgui.input_text_with_hint("##host", "ssh alias or user@host", s.ssh_host)
             imgui.end_table()
+        if s.backend == "mounted":
+            if imgui.small_button(f"{fa.ICON_FA_MAGNIFYING_GLASS}  Detect"):
+                self.detect_mounts()
+            imgui.same_line()
+            if self.mounts is None:
+                imgui.text_disabled("looking for folders showing " + s.mount_base)
+            elif not self.mounts:
+                imgui.text_disabled(f"no folder on this machine shows {s.mount_base}; map the share first (e.g. SSHFS-Win)")
+            else:
+                imgui.text_disabled(f"folders showing {s.mount_base}, found by what they point at:")
+                for i, mount in enumerate(self.mounts):
+                    if imgui.small_button(f"use##mount_{i}"):
+                        self.use_mount(mount)
+                    imgui.same_line()
+                    imgui.text_colored(OK if mount.root == s.mount_root else TEXT, mount.root)
+                    imgui.same_line()
+                    imgui.text_disabled(mount.remote)
         hint = (
-            "BioHPC paths resolve under this folder: /archive/x is <root>/archive/x"
+            f"BioHPC paths resolve under this folder: {s.mount_base.rstrip('/')}/data2 is <root>/data2"
             if s.backend == "mounted"
             else "ssh runs with BatchMode, so the key must already be set up (ssh-copy-id)"
         )
         draw_wrapped(hint, DIM)
 
-        imgui.dummy(imgui.ImVec2(0, 0.6 * em))
-        self.step(2, "Destinations", "the folders Transfer offers")
+    def draw_destinations(self) -> None:
+        """The folders Transfer offers, each with what goes there."""
+        em = imgui.get_font_size()
+        s = self.settings
+        draw_wrapped("The folders Transfer offers.", DIM)
         remove = None
         for i, pair in enumerate(s.destinations):
             if imgui.small_button(f"{fa.ICON_FA_XMARK}##dest_{i}"):
@@ -967,8 +1133,10 @@ class Lab4App:
         if imgui.button(f"{fa.ICON_FA_PLUS}  Add destination"):
             s.destinations.append(["", ""])
 
-        imgui.dummy(imgui.ImVec2(0, 0.6 * em))
-        self.step(3, "Viewers", "what opens a dataset on a double-click: a name on PATH or the executable's full path")
+    def draw_viewers(self) -> None:
+        """What opens a dataset: a name on PATH or the executable's full path."""
+        s = self.settings
+        draw_wrapped("What opens a dataset on a double-click: a name on PATH or the executable's full path.", DIM)
         if self.begin_form("viewers"):
             self.row("mbo")
             _, s.command_mbo = imgui.input_text_with_hint("##mbo", "mbo", s.command_mbo)
@@ -978,8 +1146,6 @@ class Lab4App:
         for name, command in (("mbo", s.command_mbo), ("masknmf", s.command_masknmf)):
             found = shutil.which(command)
             imgui.text_colored(OK if found else WARN, f"{name}: {found or 'not found; datasets it opens will not open'}")
-        imgui.dummy(imgui.ImVec2(0, 0.6 * em))
-        draw_wrapped(f"saved to {data_dir() / 'settings.json'}", DIM)
 
     def draw_footer(self, dialog: idl.FileDialog) -> None:
         """What blocks the page's action or the last outcome on the left; Sign out, Quit and the action on the right."""

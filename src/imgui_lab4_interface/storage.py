@@ -2,7 +2,7 @@
 Where data goes: a Storage protocol over BioHPC paths, the two ways this machine reaches them, and a Transfer
 that copies local files into one.
 
-Paths given to a Storage are always BioHPC's own posix paths (/archive/..., /work/...); each backend maps them
+Paths given to a Storage are always BioHPC's own posix paths (/biohpc/data2/...), the paths Lab4 stores; each backend maps them
 to whatever it talks to. The window only ever sees the protocol, so a remote backend (an http service, Globus)
 slots in by implementing it.
 """
@@ -52,6 +52,9 @@ class Storage(Protocol):
 
     def read_text(self, path: str) -> str: ...
 
+    def mkdir(self, path: str) -> None:
+        """Make the folder when missing; its parent must exist."""
+
     def open_write(self, path: str) -> BinaryIO:
         """A writable binary file at path, its parent folders made; closing it finishes the write."""
 
@@ -63,14 +66,24 @@ class Storage(Protocol):
 
 
 class MountedStorage:
-    """BioHPC paths resolved under a local folder the share is mounted at, e.g. a mapped lamella drive."""
+    """
+    BioHPC paths resolved under a local folder the share is mounted at, e.g. drive X: mapped to /biohpc.
 
-    def __init__(self, root: str):
+    Args:
+        root (str): The local folder
+        base (str): The BioHPC path root shows; paths outside it are not reachable here
+    """
+
+    def __init__(self, root: str, base: str = "/"):
         self.root = Path(root)
-        self.label = str(root) or "no mount root"
+        self.base = "/" + base.strip("/")
+        self.label = f"{root} ({self.base})" if str(root) else "no mount root"
 
     def local(self, path: str) -> Path:
-        return self.root / path.lstrip("/")
+        relative = posixpath.relpath(posixpath.normpath(path), self.base)
+        if relative == ".." or relative.startswith("../"):
+            raise OSError(f"{path} is outside {self.base}, the folder {self.root} shows")
+        return self.root if relative == "." else self.root / relative
 
     def check(self) -> None:
         if not str(self.root) or str(self.root) == ".":
@@ -87,6 +100,9 @@ class MountedStorage:
 
     def read_text(self, path: str) -> str:
         return self.local(path).read_text()
+
+    def mkdir(self, path: str) -> None:
+        self.local(path).mkdir(exist_ok=True)
 
     def open_write(self, path: str) -> BinaryIO:
         target = self.local(path)
@@ -171,6 +187,9 @@ class SshStorage:
     def read_text(self, path: str) -> str:
         return self.run(f"cat {shlex.quote(path)}")
 
+    def mkdir(self, path: str) -> None:
+        self.run(f"test -d {shlex.quote(path)} || mkdir {shlex.quote(path)}")
+
     def open_write(self, path: str) -> SshWriter:
         return SshWriter(self.base, path)
 
@@ -188,10 +207,79 @@ class SshStorage:
         return None
 
 
+class Mount(NamedTuple):
+    """A folder on this machine and the remote share it shows."""
+
+    root: str
+    remote: str
+
+
+def shows(remote: str, base: str) -> bool:
+    """Whether a remote share names base, e.g. \\\\sshfs.kr\\me@host!2216\\biohpc or me@host:/biohpc for /biohpc."""
+    return remote.replace("\\", "/").rstrip("/").lower().endswith("/" + base.strip("/").lower())
+
+
+def mapped_drives() -> list[Mount]:
+    """This logon session's mapped drive letters and their shares (Windows); another user's mappings are not seen."""
+    import ctypes
+    import string
+
+    mpr = ctypes.WinDLL("mpr")
+    letters = ctypes.windll.kernel32.GetLogicalDrives()
+    found = []
+    for i, letter in enumerate(string.ascii_uppercase):
+        if not letters >> i & 1:
+            continue
+        buffer, size = ctypes.create_unicode_buffer(1024), ctypes.c_ulong(1024)
+        # 1201: mapped but disconnected; the share is still named
+        if mpr.WNetGetConnectionW(f"{letter}:", buffer, ctypes.byref(size)) in (0, 1201):
+            found.append(Mount(f"{letter}:\\", buffer.value))
+    return found
+
+
+def mounted_shares() -> list[Mount]:
+    """Mounts listed by `mount` (Linux, macOS): `source on target type ...` or `source on target (...)`."""
+    try:
+        out = subprocess.run(["mount"], capture_output=True, text=True, timeout=TIMEOUT_SSH).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    found = []
+    for line in out.splitlines():
+        source, _, rest = line.partition(" on ")
+        target = rest.split(" type ")[0].split(" (")[0]
+        if source and target:
+            found.append(Mount(target, source))
+    return found
+
+
+def find_mounts(base: str = "/biohpc") -> list[Mount]:
+    """The folders on this machine that show base, found by what they point at rather than their drive letter."""
+    mounts = mapped_drives() if sys.platform == "win32" else mounted_shares()
+    return [m for m in mounts if shows(m.remote, base)]
+
+
 def open_storage(settings: Settings) -> Storage:
     if settings.backend == "ssh":
         return SshStorage(settings.ssh_host)
-    return MountedStorage(settings.mount_root)
+    return MountedStorage(settings.mount_root, settings.mount_base)
+
+
+def destination_state(storage: Storage, path: str) -> tuple[str, str]:
+    """
+    (path, "exists") for a folder already there, (path, "new") for one a transfer would make; raises OSError when its
+    parent is missing, since a transfer makes at most one new folder, or when path is a file.
+    """
+    parent, name = posixpath.split(path.rstrip("/"))
+    try:
+        entries = storage.listdir(parent or "/")
+    except OSError as e:
+        raise OSError(f"{parent or '/'} does not exist; a transfer makes at most one new folder") from e
+    for entry in entries:
+        if entry.name == name:
+            if not entry.is_dir:
+                raise OSError(f"{path} is a file")
+            return path, "exists"
+    return path, "new"
 
 
 def write_text(storage: Storage, path: str, text: str) -> None:
@@ -207,7 +295,7 @@ class Transfer:
     Args:
         storage (Storage): Where to copy to
         sources (list[Path]): Files and folders on this machine
-        dest (str): The BioHPC folder they land in
+        dest (str): The BioHPC folder they land in, made when missing; its parent must exist
         metadata (dict | None): Written as <name>.lab4.json beside each source, with the source's local path added
         overwrite (bool): Whether a source already at the destination is replaced instead of refused
     """
@@ -238,6 +326,7 @@ class Transfer:
             else:
                 plan.append((source, target))
         self.total = sum(p.stat().st_size for p, _ in plan)
+        self.storage.mkdir(self.dest)
         for local, remote in plan:
             self.current = remote
             with local.open("rb") as src, self.storage.open_write(remote) as dst:

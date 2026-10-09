@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "imgui_lab4_interface"
 version = "0.1.0"
-description = "PML desktop window for moving data onto BioHPC storage and attaching Lab4 metadata to it."
+description = "PML desktop window for moving data onto BioHPC storage, attaching Lab4 metadata and registering recordings."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
@@ -14,6 +14,7 @@ authors = [{ name = "Flynn OConnell", email = "flynnoconnell@gmail.com" }]
 dependencies = [
     "imgui-bundle==1.92.801",
     "imgui-data-loader==0.2.0",
+    "psycopg[binary]==3.3.6",
 ]
 
 [project.optional-dependencies]

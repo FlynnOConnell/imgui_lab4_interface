@@ -1,5 +1,5 @@
 import json
-import sqlite3
+from contextlib import closing
 
 import pytest
 
@@ -8,7 +8,7 @@ from imgui_lab4_interface.viewers import command
 
 LAYOUT = {
     "lab/M231/2026-08-21/movie.tif": 100,
-    "lab/M231/2026-08-21/movie.tif" + SIDECAR_SUFFIX: json.dumps({"recording": "M231_2026-08-21_rec01", "key": {"subject_id": "M231", "session_date": "2026-08-21", "experimenter": "loson"}}),
+    "lab/M231/2026-08-21/movie.tif" + SIDECAR_SUFFIX: json.dumps({"recording": "M231_2026-08-21_rec01", "key": {"subject_id": "M231", "session_datetime": "2026-08-21 14:30:00", "experimenter": "loson"}}),
     "lab/M231/2026-08-21/run_20260822/config.json": "{}",
     "lab/M231/2026-08-21/run_20260822/results.hdf5": 400,
     "lab/M231/2026-08-21/suite2p/plane0/ops.npy": 10,
@@ -43,10 +43,14 @@ def scanned(tmp_path):
     return catalog, storage, found
 
 
+def rows(catalog, query: str) -> list[tuple]:
+    with closing(catalog.connect()) as db:
+        return [tuple(row) for row in db.execute(query)]
+
+
 def test_scan_finds_every_kind(scanned):
     catalog, storage, found = scanned
-    columns, rows = catalog.sql("SELECT path, kind, detail FROM datasets ORDER BY path")
-    kinds = {path: (kind, detail) for path, kind, detail in rows}
+    kinds = {path: (kind, detail) for path, kind, detail in rows(catalog, "SELECT path, kind, detail FROM datasets")}
     assert kinds == {
         "/lab/M231/2026-08-21/movie.tif": ("tiff", ""),
         "/lab/M231/2026-08-21/run_20260822": ("masknmf-run", "results.hdf5"),
@@ -80,33 +84,21 @@ def test_describe_summarizes_folders_and_items(scanned):
     assert session["suite2p"]["kinds"] == {"suite2p-plane": 2}
 
 
-def test_search_by_words_kind_and_sidecar(scanned):
+def test_sidecars_are_indexed(scanned):
     catalog, storage, _ = scanned
-    assert {r["path"] for r in catalog.search(storage.label, "kind:suite2p-plane")} == {
-        "/lab/M231/2026-08-21/suite2p/plane0",
-        "/lab/M231/2026-08-21/suite2p/plane1",
-    }
-    by_metadata = catalog.search(storage.label, "loson")
-    assert [(r["path"], r["subject"]) for r in by_metadata] == [("/lab/M231/2026-08-21/movie.tif", "M231")]
-    assert catalog.search(storage.label, "M231 plane1")[0]["kind"] == "suite2p-plane"
-    assert catalog.search(storage.label, "100%_") == []
-    assert catalog.search("another storage") == []
+    assert rows(catalog, "SELECT storage, path, subject, session_date, experimenter FROM metadata") == [
+        (storage.label, "/lab/M231/2026-08-21/movie.tif", "M231", "2026-08-21 14:30:00", "loson")
+    ]
 
 
 def test_rescan_replaces_only_its_subtree(scanned, tmp_path):
     catalog, storage, _ = scanned
     (tmp_path / "mount" / "lab" / "M231" / "tiffs" / "b.tif").unlink()
     catalog.scan(storage, "/lab/M231/tiffs")
-    paths = {r["path"] for r in catalog.search(storage.label, "kind:tiff")}
+    paths = {path for path, in rows(catalog, "SELECT path FROM datasets WHERE kind = 'tiff'")}
     assert "/lab/M231/tiffs/b.tif" not in paths
     assert "/lab/M231/2026-08-21/movie.tif" in paths
-    assert catalog.search(storage.label, "kind:tiff-series") == []
-
-
-def test_sql_is_read_only(scanned):
-    catalog, _, _ = scanned
-    with pytest.raises(sqlite3.OperationalError):
-        catalog.sql("DELETE FROM datasets")
+    assert rows(catalog, "SELECT path FROM datasets WHERE kind = 'tiff-series'") == []
 
 
 def test_command_per_viewer(tmp_path):

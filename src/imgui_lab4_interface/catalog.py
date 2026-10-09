@@ -173,7 +173,7 @@ class Catalog:
             if not isinstance(body, dict):
                 continue
             key = body.get("key") if isinstance(body.get("key"), dict) else {}
-            row = (target, body.get("recording", ""), key.get("subject_id", ""), key.get("session_date", ""), key.get("experimenter", ""))
+            row = (target, body.get("recording", ""), key.get("subject_id", ""), key.get("session_datetime", ""), key.get("experimenter", ""))
             metadata.append((*row, json.dumps(body)))
 
         label = storage.label
@@ -222,34 +222,3 @@ class Catalog:
             "scan": None if scan is None else dict(scan),
             "items": items,
         }
-
-    def search(self, storage_label: str, text: str = "", kind: str = "", limit: int = 500) -> list[dict]:
-        """
-        Datasets whose path or sidecar matches every word of text, newest first.
-
-        A word kind:<kind> narrows to one kind, as kind does.
-        """
-        clauses, params = ["d.storage = ?"], [storage_label]
-        for term in text.split():
-            if term.startswith("kind:"):
-                kind = term[len("kind:") :]
-                continue
-            like = "%" + term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
-            clauses.append("(d.path LIKE ? ESCAPE '\\' OR m.body LIKE ? ESCAPE '\\')")
-            params += [like, like]
-        if kind:
-            clauses.append("d.kind = ?")
-            params.append(kind)
-        query = (
-            "SELECT d.*, m.recording, m.subject, m.session_date FROM datasets d "
-            "LEFT JOIN metadata m ON m.storage = d.storage AND m.path = d.path "
-            f"WHERE {' AND '.join(clauses)} ORDER BY d.mtime DESC LIMIT ?"
-        )
-        with closing(self.connect()) as db:
-            return [dict(row) for row in db.execute(query, (*params, limit))]
-
-    def sql(self, query: str, limit: int = 1000) -> tuple[list[str], list[tuple]]:
-        """Run a query on a read-only connection: the column names and up to limit rows."""
-        with closing(sqlite3.connect(f"{self.path.as_uri()}?mode=ro", uri=True)) as db:
-            cursor = db.execute(query)
-            return [c[0] for c in cursor.description or []], [tuple(row) for row in cursor.fetchmany(limit)]
