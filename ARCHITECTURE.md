@@ -13,6 +13,9 @@
 - `lab4.py` — `Recording`: the Lab4 Recording key, its details, a new subject's fields, and the sidecar dict.
 - `database.py` — `Credentials` (the website's credentials file), `Lab4Database` (sign-in, `schema`, `register`,
   `recordings`) and `Schema`, the tables as the database has them now.
+- `processing.py` — overnight processing: `list_units` (a `.mesc`'s units from its headers, with h5py),
+  `sbatch_command` (one job per unit, running `pml_utilities/hpc/asap7/run_asap7.sh`), `submit` (checks the
+  transferred files' sizes first) and `jobs.json`.
 - `config.py` — `Settings` and `data_dir()`.
 
 ## Threads
@@ -24,6 +27,10 @@ or why not); `Transfer.run` makes it with `Storage.mkdir`, one level only. Datab
 its own connection. A `Transfer`
 exposes `done` / `total` / `current` counters the window reads while it runs, and `cancelled` to stop it between
 chunks.
+
+Processing is chained in `poll()`: `act` fixes the jobs when Send is pressed, and a `transfer` that lands without
+an error submits them as `process`; a failed or cancelled transfer submits nothing. Jobs go through
+`SshStorage.run` on `Settings.ssh_host` whatever the storage backend.
 
 ## Paths and remote access
 

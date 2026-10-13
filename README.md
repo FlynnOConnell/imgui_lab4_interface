@@ -23,9 +23,12 @@ lab4
    shows, e.g. `X:\` showing `/biohpc`) or ssh (an alias or `user@host` with keys already set up). Paths are always
    BioHPC's own (`/biohpc/data2/...`), the ones Lab4 stores. With no mount root set, the window looks for a drive
    or mount whose share is `/biohpc` (e.g. an SSHFS-Win `\\sshfs.kr\you@host!port\biohpc`) and uses it when there
-   is exactly one; **Detect** lists them. **Destinations** holds the folders Transfer offers and **Viewers** what
-   opens a dataset. **Save** writes them to `~/.imgui_lab4_interface/settings.json`.
-3. **Transfer.** Three steps on one page:
+   is exactly one; **Detect** lists them. **Destinations** holds the folders Transfer offers, **Viewers** what
+   opens a dataset, and **Processing** where overnight jobs run: the ssh host they are submitted through (a BioHPC
+   login node), the GPU partition, the GPUs asked for, an email for SLURM to write to when each ends, and the folder
+   on BioHPC holding the pipeline (`~/repos/pml_utilities/hpc/asap7`; set it up with that folder's README). **Save**
+   writes them to `~/.imgui_lab4_interface/settings.json`.
+3. **Transfer.** Four steps on one page:
    1. *Sources*: add files or folders.
    2. *Destination*: type a BioHPC folder or **Browse...** for one. A folder that does not exist yet is made when its
       parent exists (one new folder, never its parents); the line under the field says whether it exists, will be
@@ -34,7 +37,17 @@ lab4
       label, weight and notes, and any extra key/value fields. Signed in, the choices come from Lab4's lookup tables,
       and a subject new to Lab4 asks for the fields its Subject row needs.
 
-   Send copies each source under its own name with `<name>.lab4.json` beside it.
+   4. *Processing*: tick **Process .mesc units overnight** to run the ASAP7 spine pipeline (`asap7_spine.py`, the
+      batch form of `asap7_spine_pipeline_detrend.ipynb`) on BioHPC. Each `.mesc` among the sources, or inside a
+      folder among them, lists its units read from its headers; scans with a frame rate and enough frames are
+      shown, z-stacks, snapshots and RTMC streams are not. Tick the units to run and set the channel, frames dropped
+      at the start, MAD correlation threshold and detrend window (the notebook's values by default).
+
+   Send copies each source under its own name with `<name>.lab4.json` beside it. With processing on, once the copy
+   finishes the window checks each `.mesc` is on BioHPC at its full size, then submits one SLURM job per unit over
+   ssh. Results land beside the `.mesc` in `masknmf_asap7/<unit>_detrend_<time>/`, holding the job's log
+   (`logs/slurm_<job>.out`) and masknmf's run folder, which Browse opens in `masknmf view`. The jobs submitted are
+   listed under step 4; **Check** asks `sacct` for their state.
 4. **Browse storage.** List BioHPC folders, see which items already carry metadata, and attach a sidecar to data
    that is already there, using the same metadata form, folded below the list. **Scan** catalogs the folder and
    everything under it: each dataset's kind, what every folder holds, and the sidecars. Double-click a folder to enter it and a dataset file to open it in mbo or
@@ -62,6 +75,7 @@ Everything lives under `~/.imgui_lab4_interface/` (override with `IMGUI_LAB4_HOM
 | `window.ini` | window layout |
 | `catalog.sqlite` | the catalog: `datasets`, `folders`, `metadata`, `scans` |
 | `logs/` | output of each viewer opened |
+| `jobs.json` | every processing job submitted: job id, unit, `.mesc`, run folder, settings |
 
 ## Development database
 

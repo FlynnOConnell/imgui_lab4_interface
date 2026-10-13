@@ -36,6 +36,11 @@ class Settings:
         destinations (list): [path, description] pairs offered on the Transfer page
         command_mbo (str): The mbo executable, a name on PATH or a full path
         command_masknmf (str): The masknmf executable, a name on PATH or a full path
+        partition (str): The SLURM partition processing jobs run on, one with GPUs
+        gres (str): The GPUs a processing job asks for, e.g. gpu:1; empty asks for none
+        email (str): Where SLURM writes when a processing job ends or fails; empty for no mail
+        dir_asap7 (str): The folder on BioHPC holding run_asap7.sh and asap7_spine.py; ~/ is the BioHPC home
+        cluster_root (str): Where mount_base is on BioHPC's own nodes, e.g. the lab's /project folder the /biohpc share mounts
     """
 
     backend: str = "mounted"
@@ -45,6 +50,11 @@ class Settings:
     destinations: list = dataclasses.field(default_factory=lambda: [list(d) for d in DESTINATIONS])
     command_mbo: str = "mbo"
     command_masknmf: str = "masknmf"
+    partition: str = ""
+    gres: str = "gpu:1"
+    email: str = ""
+    dir_asap7: str = "~/repos/pml_utilities/hpc/asap7"
+    cluster_root: str = "/project/OBI/OBI_faculty/Losonczy_lab/shared"
 
     @classmethod
     def load(cls, path: Optional[Path] = None) -> "Settings":

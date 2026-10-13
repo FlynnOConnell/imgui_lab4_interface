@@ -13,6 +13,7 @@ license-files = ["LICENSE"]
 authors = [{ name = "Flynn OConnell", email = "flynnoconnell@gmail.com" }]
 dependencies = [
     "imgui-bundle==1.92.801",
+    "h5py==3.16.0",
     "imgui-data-loader==0.2.0",
     "psycopg[binary]==3.3.6",
 ]

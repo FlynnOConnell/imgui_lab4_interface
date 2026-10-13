@@ -18,11 +18,12 @@ from imgui_bundle import hello_imgui, imgui, imgui_ctx, immapp
 from imgui_bundle import icons_fontawesome_6 as fa
 from imgui_bundle import portable_file_dialogs as pfd
 
-from imgui_lab4_interface import __version__, lab4, viewers
+from imgui_lab4_interface import __version__, lab4, processing, viewers
 from imgui_lab4_interface.catalog import KINDS, Catalog
 from imgui_lab4_interface.config import BACKENDS, Settings, data_dir
 from imgui_lab4_interface.database import BIOHPC, Credentials, Lab4Database, Schema, secrets_path
-from imgui_lab4_interface.storage import SIDECAR_SUFFIX, Entry, Mount, Transfer, destination_state, find_mounts, open_storage, write_text
+from imgui_lab4_interface.processing import Asap7Params, Job, MescUnit
+from imgui_lab4_interface.storage import SIDECAR_SUFFIX, Entry, Mount, SshStorage, Transfer, destination_state, find_mounts, open_storage, write_text
 
 ACCENT = imgui.ImVec4(0.40, 0.68, 1.00, 1.0)
 KEY = imgui.ImVec4(1.00, 0.80, 0.20, 1.0)
@@ -56,6 +57,8 @@ WIDTH_RAIL_EM = 13
 WIDTH_CAPTION_EM = 9
 WIDTH_LOGIN_EM = 22
 TITLE_PICKER = "Choose destination"
+NUMBER_JOBS_SHOWN = 8
+STATES_FAILED = ("FAILED", "CANCELLED", "TIMEOUT", "OUT_OF_MEMORY", "NODE_FAIL", "PREEMPTED")
 
 # the rail: a page key, its icon, its name, and the line under the name on its page
 PAGES = (
@@ -85,6 +88,17 @@ def draw_hint(text: str) -> None:
     imgui.text_disabled("(?)")
     if imgui.is_item_hovered():
         idl.wrapped_tooltip(text)
+
+
+def read_mesc(sources: list[Path]) -> list[tuple[str, str, list[MescUnit] | str]]:
+    """Each .mesc among the sources: its local path, its path under the destination, and its units or why not."""
+    found = []
+    for local, relative in processing.find_mesc(sources):
+        try:
+            found.append((str(local), relative, processing.list_units(local)))
+        except OSError as e:
+            found.append((str(local), relative, f"cannot read its units: {e}"))
+    return found
 
 
 def is_recording_data(path: str) -> bool:
@@ -150,6 +164,17 @@ class Lab4App:
         self.attach = True
         self.recording = lab4.Recording()
         self.transfer: Optional[Transfer] = None
+        # processing: whether to, the sources the .mesc list was read for, each .mesc's units or why they could not be read
+        self.process = False
+        self.params = Asap7Params()
+        self.mesc_for: Optional[tuple] = None
+        self.mesc: list[tuple[str, str, list[MescUnit] | str]] = []
+        self.chosen: set[tuple[str, str]] = set()
+        # the units a running transfer processes once it lands, the jobs submitted so far, and their states
+        self.pending: list[Job] = []
+        self.pending_params = Asap7Params()
+        self.jobs = processing.load_jobs()
+        self.job_states: dict[str, str] = {}
         self.path_browse = self.settings.destinations[0][0] if self.settings.destinations else "/"
         self.entries: list[Entry] = []
         self.error_browse = ""
@@ -358,6 +383,29 @@ class Lab4App:
                 if error is None:
                     self.transfer = None
                     self.browse(path=self.path_browse)
+                if error is None and self.pending:
+                    self.message += f"; submitting {len(self.pending)} processing job(s)"
+                    self.submit("process", processing.submit, self.run_remote, copy.deepcopy(self.settings), self.pending, self.pending_params, self.storage)
+                else:
+                    self.pending = []
+            elif name == "process":
+                self.jobs = processing.load_jobs()
+                self.failed = error is not None
+                if error is None:
+                    ids = [job["job_id"] for job in future.result()]
+                    self.message = f"submitted job(s) {', '.join(ids)} on {self.settings.partition}"
+                else:
+                    waiting = sum(job["job_id"] is None for job in self.jobs)
+                    self.message = f"{waiting} job(s) wait to be submitted ({error}); Submit them under step 4 once BioHPC answers"
+                self.pending = []
+            elif name == "mesc":
+                self.mesc = [] if error is not None else future.result()
+                keys = {(local, unit.key) for local, _, units in self.mesc if isinstance(units, list) for unit in units}
+                self.chosen &= keys
+            elif name == "states":
+                self.job_states = {} if error is not None else future.result()
+                self.message = f"job states: {error}" if error is not None else ""
+                self.failed = error is not None
             elif name == "dest_check":
                 _, state = (None, str(error)) if error is not None else future.result()
                 if self.dest_checked == self.destination():
@@ -373,6 +421,41 @@ class Lab4App:
             if chosen:
                 self.store.record_selection(idl.DialogResult(paths=chosen))
             self.picker = None
+
+    def run_remote(self, command: str) -> str:
+        """Run a shell command on the host processing jobs are submitted to."""
+        return SshStorage(self.settings.ssh_host).run(command)
+
+    def read_mesc(self) -> None:
+        """Read the units of every .mesc among the sources, once per set of sources."""
+        sources = tuple(self.sources)
+        if sources != self.mesc_for and "mesc" not in self.futures:
+            self.mesc_for = sources
+            self.submit("mesc", read_mesc, [Path(s) for s in sources])
+
+    def jobs_to_send(self) -> list[Job]:
+        """The chosen units, each with where the transfer puts its .mesc and a run folder beside it."""
+        dest = self.destination()
+        when = datetime.now()
+        jobs = []
+        for local, relative, units in self.mesc:
+            if not isinstance(units, list):
+                continue
+            mesc = f"{dest}/{relative}"
+            jobs += [Job(local, mesc, unit.key, processing.dir_save(mesc, unit.key, when)) for unit in units if (local, unit.key) in self.chosen]
+        return jobs
+
+    def submit_waiting(self) -> None:
+        """Submit the jobs chosen earlier that sbatch never took."""
+        waiting = [job for job in self.jobs if job["job_id"] is None]
+        if waiting and "process" not in self.futures:
+            self.message = ""
+            self.submit("process", processing.submit_waiting, self.run_remote, copy.deepcopy(self.settings), waiting, self.storage)
+
+    def check_jobs(self) -> None:
+        ids = [job["job_id"] for job in self.jobs[-NUMBER_JOBS_SHOWN:]]
+        if ids and "states" not in self.futures:
+            self.submit("states", processing.job_states, self.run_remote, ids)
 
     def open_picker(self, folders: bool) -> None:
         if self.picker is not None:
@@ -430,6 +513,8 @@ class Lab4App:
                 found.append(self.dest_state)
             if self.attach:
                 found += self.recording.problems()
+            if self.process:
+                found += self.process_problems()
         elif self.page == "browse":
             if not self.selected:
                 found.append("select a file or folder to attach metadata to")
@@ -438,9 +523,26 @@ class Lab4App:
             found += self.recording.problems()
         return found
 
+    def process_problems(self) -> list[str]:
+        """What keeps the chosen units from being processed once sent."""
+        found = []
+        if not self.settings.partition.strip():
+            found.append("set the GPU partition processing runs on, in Settings > Processing")
+        if "mesc" in self.futures or self.mesc_for != tuple(self.sources):
+            found.append("reading the .mesc files' units")
+        elif not self.mesc:
+            found.append("processing runs on .mesc files; none of the sources is or holds one")
+        elif not self.chosen:
+            found.append("choose the units to process")
+        base = "/" + self.settings.mount_base.strip("/")
+        if not self.destination().startswith(f"{base}/"):
+            found.append(f"processing reads the .mesc from BioHPC; send it under {base}")
+        return found + self.params.problems()
+
     def label_action(self) -> Optional[str]:
         if self.page == "transfer":
-            return f"{fa.ICON_FA_CLOUD_ARROW_UP}  Send {len(self.sources)} item{'' if len(self.sources) == 1 else 's'}"
+            label = f"{fa.ICON_FA_CLOUD_ARROW_UP}  Send {len(self.sources)} item{'' if len(self.sources) == 1 else 's'}"
+            return label + (f", process {len(self.chosen)} unit{'' if len(self.chosen) == 1 else 's'}" if self.process else "")
         if self.page == "browse":
             return f"{fa.ICON_FA_TAGS}  Attach metadata"
         if self.page == "settings":
@@ -453,6 +555,8 @@ class Lab4App:
             metadata = self.recording.sidecar(user=self.user) if self.attach else None
             sources = [Path(s) for s in self.sources]
             self.transfer = Transfer(self.storage, sources, self.destination(), metadata, self.overwrite)
+            self.pending = self.jobs_to_send() if self.process else []
+            self.pending_params = copy.deepcopy(self.params)
             self.submit("transfer", self.transfer.run)
         elif self.page == "browse":
             path = f"{self.path_browse.rstrip('/')}/{self.selected}{SIDECAR_SUFFIX}"
@@ -787,6 +891,13 @@ class Lab4App:
             self.draw_recording()
         _, self.overwrite = imgui.checkbox("Overwrite what is already at the destination", self.overwrite)
 
+        imgui.dummy(imgui.ImVec2(0, 0.6 * em))
+        self.step(4, "Processing", "run the ASAP7 spine pipeline on BioHPC on the units chosen, once the transfer lands")
+        _, self.process = imgui.checkbox("Process .mesc units overnight", self.process)
+        if self.process:
+            self.draw_processing()
+        self.draw_jobs()
+
         if self.transfer is not None:
             imgui.dummy(imgui.ImVec2(0, 0.6 * em))
             running = "transfer" in self.futures
@@ -801,6 +912,107 @@ class Lab4App:
                 if imgui.small_button("dismiss"):
                     self.transfer = None
                     self.message = ""
+
+    def draw_processing(self) -> None:
+        """The units of each .mesc among the sources to tick, then what the pipeline runs with."""
+        em = imgui.get_font_size()
+        self.read_mesc()
+        if "mesc" in self.futures:
+            imgui.text_disabled("reading the .mesc files' units...")
+        elif not self.mesc:
+            draw_wrapped("No .mesc among the sources; add one, or a folder holding one.", DIM)
+        for local, relative, units in self.mesc:
+            imgui.text_colored(PATH, f"{fa.ICON_FA_FILE}  {relative}")
+            if isinstance(units, str):
+                draw_wrapped(units, ERROR)
+                continue
+            runnable = [u for u in units if processing.is_runnable(u, self.params)]
+            flags = imgui.TableFlags_.row_bg | imgui.TableFlags_.borders_inner_h | imgui.TableFlags_.sizing_stretch_prop
+            if runnable and imgui.begin_table(f"##units_{local}", 5, flags):
+                imgui.table_setup_column("##pick", imgui.TableColumnFlags_.width_fixed, 1.6 * em)
+                imgui.table_setup_column("unit", imgui.TableColumnFlags_.width_fixed, 11 * em)
+                imgui.table_setup_column("frames", imgui.TableColumnFlags_.width_fixed, 5 * em)
+                imgui.table_setup_column("length", imgui.TableColumnFlags_.width_fixed, 8 * em)
+                imgui.table_setup_column("comment", imgui.TableColumnFlags_.width_stretch)
+                imgui.table_headers_row()
+                for unit in runnable:
+                    key = (local, unit.key)
+                    imgui.table_next_row()
+                    imgui.table_next_column()
+                    ticked, on = imgui.checkbox(f"##{local}_{unit.key}", key in self.chosen)
+                    if ticked:
+                        self.chosen = self.chosen | {key} if on else self.chosen - {key}
+                    imgui.table_next_column()
+                    imgui.text(unit.key)
+                    imgui.table_next_column()
+                    imgui.text(str(unit.frames))
+                    imgui.table_next_column()
+                    imgui.text(f"{unit.seconds:.0f} s at {unit.fs:.0f} Hz")
+                    imgui.table_next_column()
+                    imgui.text_disabled(unit.comment)
+                imgui.end_table()
+            hidden = len(units) - len(runnable)
+            if hidden:
+                imgui.text_disabled(f"{hidden} other unit(s) hidden: z-stacks, snapshots, RTMC streams, or too few frames")
+        self.subsection("Pipeline", "asap7_spine.py, the batch form of asap7_spine_pipeline_detrend.ipynb; defaults are the notebook's")
+        params = self.params
+        if self.begin_form("asap7"):
+            self.row("channel")
+            _, params.channel = imgui.input_int("##channel", params.channel)
+            self.row("drop first")
+            _, params.exclude_initial_frames = imgui.input_int("##exclude", params.exclude_initial_frames, 50)
+            self.row("MAD threshold")
+            _, params.mad_correlation_threshold = imgui.input_float("##mad", params.mad_correlation_threshold, 0.05, 0.1, "%.2f")
+            self.row("detrend window")
+            _, params.detrend_window_s = imgui.input_float("##detrend", params.detrend_window_s, 0.05, 0.1, "%.2f s")
+            imgui.end_table()
+        partition = self.settings.partition or "(no partition set)"
+        draw_wrapped(
+            f"Each unit is one job on {partition} through ssh {self.settings.ssh_host}, submitted once the transfer lands whole; "
+            f"results go to <folder>/{processing.NAME_RESULTS}/<unit>_detrend_<time> beside the .mesc."
+            + (f" SLURM mails {self.settings.email} when each ends." if self.settings.email else ""),
+            DIM,
+        )
+
+    def draw_jobs(self) -> None:
+        """The last jobs this machine submitted, with their SLURM state once checked."""
+        if not self.jobs:
+            return
+        em = imgui.get_font_size()
+        self.subsection("Submitted", f"the last {NUMBER_JOBS_SHOWN} jobs this machine submitted, newest first")
+        imgui.same_line()
+        imgui.begin_disabled("states" in self.futures)
+        if imgui.small_button(f"{fa.ICON_FA_ARROWS_ROTATE}  Check"):
+            self.check_jobs()
+        imgui.end_disabled()
+        waiting = sum(job["job_id"] is None for job in self.jobs)
+        if waiting:
+            imgui.same_line()
+            imgui.begin_disabled("process" in self.futures or not self.settings.partition.strip())
+            if imgui.small_button(f"{fa.ICON_FA_PLAY}  Submit {waiting} waiting"):
+                self.submit_waiting()
+            imgui.end_disabled()
+        flags = imgui.TableFlags_.row_bg | imgui.TableFlags_.borders_inner_h | imgui.TableFlags_.sizing_stretch_prop
+        if imgui.begin_table("##jobs", 4, flags):
+            imgui.table_setup_column("job", imgui.TableColumnFlags_.width_fixed, 5 * em)
+            imgui.table_setup_column("unit", imgui.TableColumnFlags_.width_fixed, 11 * em)
+            imgui.table_setup_column("state", imgui.TableColumnFlags_.width_fixed, 10 * em)
+            imgui.table_setup_column("results", imgui.TableColumnFlags_.width_stretch)
+            for job in reversed(self.jobs[-NUMBER_JOBS_SHOWN:]):
+                imgui.table_next_row()
+                imgui.table_next_column()
+                imgui.text(job["job_id"] or "-")
+                imgui.table_next_column()
+                imgui.text(job["unit"])
+                imgui.table_next_column()
+                state = self.job_states.get(job["job_id"], "") if job["job_id"] else "waiting to submit"
+                color = OK if state.startswith("COMPLETED") else ERROR if state.split(" ")[0] in STATES_FAILED else WARN if not job["job_id"] else TEXT
+                imgui.text_colored(color, state or "not checked")
+                imgui.table_next_column()
+                imgui.text_disabled(job["dir_save"])
+                if imgui.is_item_hovered():
+                    idl.wrapped_tooltip(f"{job['mesc']}\nchosen {job['chosen_at']}, submitted {job['submitted_at'] or 'not yet'}")
+            imgui.end_table()
 
     def subsection(self, title: str, hint: str) -> None:
         """A small heading inside a step, with a (?) hint."""
@@ -1061,7 +1273,13 @@ class Lab4App:
     def draw_settings(self) -> None:
         """One tab per group of settings; Save writes them all."""
         if imgui.begin_tab_bar("##settings"):
-            for name, draw in (("Connection", self.draw_connection), ("Destinations", self.draw_destinations), ("Viewers", self.draw_viewers)):
+            tabs = (
+                ("Connection", self.draw_connection),
+                ("Destinations", self.draw_destinations),
+                ("Viewers", self.draw_viewers),
+                ("Processing", self.draw_processing_settings),
+            )
+            for name, draw in tabs:
                 if imgui.begin_tab_item(name)[0]:
                     imgui.dummy(imgui.ImVec2(0, 0.3 * imgui.get_font_size()))
                     draw()
@@ -1146,6 +1364,30 @@ class Lab4App:
         for name, command in (("mbo", s.command_mbo), ("masknmf", s.command_masknmf)):
             found = shutil.which(command)
             imgui.text_colored(OK if found else WARN, f"{name}: {found or 'not found; datasets it opens will not open'}")
+
+    def draw_processing_settings(self) -> None:
+        """Where processing jobs are submitted, what they ask SLURM for, and where the pipeline lives on BioHPC."""
+        s = self.settings
+        draw_wrapped("Processing jobs are submitted over ssh with this machine's keys; hpc/asap7/README.md in pml_utilities sets up BioHPC.", DIM)
+        if self.begin_form("processing"):
+            self.row("ssh host")
+            _, s.ssh_host = imgui.input_text_with_hint("##phost", "ssh alias or user@host of a BioHPC login node", s.ssh_host)
+            self.row("partition")
+            _, s.partition = imgui.input_text_with_hint("##partition", "a SLURM partition with GPUs", s.partition)
+            self.row("GPUs")
+            _, s.gres = imgui.input_text_with_hint("##gres", "gpu:1", s.gres)
+            self.row("email")
+            _, s.email = imgui.input_text_with_hint("##email", "mailed when each job ends or fails; empty for none", s.email)
+            self.row("pipeline folder")
+            _, s.dir_asap7 = imgui.input_text_with_hint("##dir_asap7", "~/repos/pml_utilities/hpc/asap7", s.dir_asap7)
+            self.row(f"{s.mount_base} is")
+            _, s.cluster_root = imgui.input_text_with_hint("##cluster_root", "the folder the share is on BioHPC's nodes", s.cluster_root)
+            imgui.end_table()
+        draw_wrapped(
+            f"The ssh host is the same one the SSH connection uses. ~/ in the pipeline folder is your BioHPC home. Jobs see "
+            f"{s.mount_base}/data2 as {s.cluster_root.rstrip('/')}/data2.",
+            DIM,
+        )
 
     def draw_footer(self, dialog: idl.FileDialog) -> None:
         """What blocks the page's action or the last outcome on the left; Sign out, Quit and the action on the right."""
