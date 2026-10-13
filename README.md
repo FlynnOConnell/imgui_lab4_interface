@@ -37,11 +37,12 @@ lab4
       label, weight and notes, and any extra key/value fields. Signed in, the choices come from Lab4's lookup tables,
       and a subject new to Lab4 asks for the fields its Subject row needs.
 
-   4. *Processing*: tick **Process .mesc units overnight** to run the ASAP7 spine pipeline (`asap7_spine.py`, the
-      batch form of `asap7_spine_pipeline_detrend.ipynb`) on BioHPC. Each `.mesc` among the sources, or inside a
-      folder among them, lists its units read from its headers; scans with a frame rate and enough frames are
-      shown, z-stacks, snapshots and RTMC streams are not. Tick the units to run and set the channel, frames dropped
-      at the start, MAD correlation threshold and detrend window (the notebook's values by default).
+   4. *Processing*: tick **Process .mesc units overnight** to run the ASAP7 spine pipeline (`mbo asap7` from
+      pml_utilities, the batch form of `asap7_spine_pipeline_detrend.ipynb`) on BioHPC. Each `.mesc` among the sources, or inside a
+      folder among them, lists its units read from its headers; movies (time series, chessboard and ribbon scans)
+      with a frame rate and enough frames are shown, volumes, z-stacks, line scans, snapshots and RTMC streams are
+      not. Tick the units to run and set the channel (from 1), first frame, MAD correlation threshold and detrend
+      window (the notebook's values by default).
 
    Send copies each source under its own name with `<name>.lab4.json` beside it. With processing on, once the copy
    finishes the window checks each `.mesc` is on BioHPC at its full size, then submits one SLURM job per unit over

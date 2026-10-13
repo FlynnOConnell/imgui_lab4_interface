@@ -37,8 +37,9 @@ def write_mesc(path, units: dict) -> None:
 
 
 UNITS = {
-    "MSession_0/MUnit_14": (500, {"ImageRoleDebugString": b"measurement", "TStepInMs": 1.29, "Comment": b"0.35,770Hz"}),
-    "MSession_0/MUnit_9": (300, {"ImageRoleDebugString": b"measurement", "TStepInMs": 0.87}),
+    "MSession_0/MUnit_14": (500, {"ImageRoleDebugString": b"measurement", "TStepInMs": 1.29, "Comment": b"0.35,770Hz", "MethodType": 10}),
+    "MSession_0/MUnit_9": (300, {"ImageRoleDebugString": b"measurement", "TStepInMs": 0.87, "MethodType": 8}),
+    "MSession_0/MUnit_4": (602, {"ImageRoleDebugString": b"measurement", "TStepInMs": 13.5, "MethodType": 11}),
     "MSession_0/MUnit_13": (1, {"ImageRoleDebugString": b"measurement", "TStepInMs": 1966.0}),
     "MSession_0/MUnit_18": (10, {"ImageRoleDebugString": b"measurement"}),
     "MSession_1/MUnit_23": (500, {"ImageRoleDebugString": b"motionCorrection", "TStepInMs": 1.29}),
@@ -48,12 +49,12 @@ UNITS = {
 def test_list_units_reads_headers_and_keeps_only_runnable_scans(tmp_path):
     write_mesc(tmp_path / "scan.mesc", UNITS)
     units = list_units(tmp_path / "scan.mesc")
-    assert [u.key for u in units] == ["MSession_0/MUnit_9", "MSession_0/MUnit_13", "MSession_0/MUnit_14", "MSession_0/MUnit_18", "MSession_1/MUnit_23"]
-    unit = units[2]
-    assert (unit.role, unit.frames, unit.comment) == ("measurement", 500, "0.35,770Hz")
+    assert [u.key for u in units] == ["MSession_0/MUnit_4", "MSession_0/MUnit_9", "MSession_0/MUnit_13", "MSession_0/MUnit_14", "MSession_0/MUnit_18", "MSession_1/MUnit_23"]
+    unit = units[3]
+    assert (unit.role, unit.frames, unit.comment, unit.method) == ("measurement", 500, "0.35,770Hz", 10)
     assert unit.fs == pytest.approx(1000 / 1.29) and unit.seconds == pytest.approx(0.645)
     assert [u.key for u in units if is_runnable(u, Asap7Params())] == ["MSession_0/MUnit_9", "MSession_0/MUnit_14"]
-    assert [u.key for u in units if is_runnable(u, Asap7Params(exclude_initial_frames=400))] == ["MSession_0/MUnit_14"]
+    assert [u.key for u in units if is_runnable(u, Asap7Params(first_frame=400))] == ["MSession_0/MUnit_14"]
 
 
 def test_find_mesc_in_files_and_folders(tmp_path):
@@ -73,12 +74,12 @@ def test_sbatch_command_quotes_paths_and_keeps_home_remote():
     assert command.startswith(f"mkdir -p {dir_run}/logs && sbatch --parsable --job-name=asap7_MUnit_14 --partition=GPUA100 ")
     assert f"--output={dir_run}/logs/slurm_%j.out" in command
     assert "--gres=gpu:1 --mail-type=END,FAIL --mail-user=me@lab.org" in command
-    assert '"$HOME"/repos/pml_utilities/hpc/asap7/run_asap7.sh "$HOME"/repos/pml_utilities/hpc/asap7/asap7_spine.py' in command
-    words = shlex.split(command.split("/asap7_spine.py ", 1)[1])
-    assert words == ["/project/OBI/OBI_faculty/Losonczy_lab/shared/data2/M231/my scan.mesc", "MSession_0/MUnit_14", "0", "200", "0.5", "0.3", dir_run]
+    assert '"$HOME"/repos/pml_utilities/hpc/asap7/run_asap7.sh ' in command
+    words = shlex.split(command.split("/run_asap7.sh ", 1)[1])
+    assert words == ["/project/OBI/OBI_faculty/Losonczy_lab/shared/data2/M231/my scan.mesc", "MSession_0/MUnit_14", "1", "200", "0.5", "0.3", dir_run]
 
     bare = sbatch_command(Settings(partition="p", gres="", dir_asap7="/opt/asap7/"), job, Asap7Params())
-    assert "--gres" not in bare and "--mail" not in bare and "/opt/asap7/run_asap7.sh /opt/asap7/asap7_spine.py" in bare
+    assert "--gres" not in bare and "--mail" not in bare and " /opt/asap7/run_asap7.sh /biohpc" not in bare and "/opt/asap7/run_asap7.sh " in bare
     with pytest.raises(ValueError, match="outside /biohpc"):
         sbatch_command(settings, job._replace(mesc="/archive/scan.mesc"), Asap7Params())
 
@@ -129,15 +130,15 @@ def test_jobs_wait_when_biohpc_refuses_and_submit_later(tmp_path, monkeypatch):
     storage, jobs = landed(tmp_path, size_remote=10)
 
     with pytest.raises(OSError, match="Permission denied"):
-        submit(refuse_ssh, Settings(partition="p"), jobs, Asap7Params(channel=1), storage)
+        submit(refuse_ssh, Settings(partition="p"), jobs, Asap7Params(channel=2), storage)
     waiting = load_jobs()
-    assert [job["job_id"] for job in waiting] == [None, None] and waiting[0]["params"]["channel"] == 1
+    assert [job["job_id"] for job in waiting] == [None, None] and waiting[0]["params"]["channel"] == 2
 
     (tmp_path / "scan.mesc").unlink()
     commands = []
     submit_waiting(lambda command: commands.append(command) or "55", Settings(partition="p"), waiting, storage)
     assert [job["job_id"] for job in load_jobs()] == ["55", "55"]
-    assert all(" MSession_0/MUnit_1 1 " in c or " MSession_0/MUnit_2 1 " in c for c in commands)
+    assert all(" MSession_0/MUnit_1 2 " in c or " MSession_0/MUnit_2 2 " in c for c in commands)
 
 
 def test_job_states_from_sacct():

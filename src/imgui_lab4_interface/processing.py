@@ -1,6 +1,6 @@
 """
-Overnight processing: the units of a Femtonics .mesc file to choose from, and the SLURM job that runs the ASAP7 spine
-pipeline (pml_utilities/hpc/asap7) on one of them once a transfer has landed the file on BioHPC.
+Overnight processing: the units of a Femtonics .mesc file to choose from, and the SLURM job that runs `mbo asap7`
+(pml_utilities, through hpc/asap7/run_asap7.sh) on one of them once a transfer has landed the file on BioHPC.
 """
 
 import dataclasses
@@ -19,6 +19,8 @@ from imgui_lab4_interface.storage import Storage
 
 SUFFIX_MESC = ".mesc"
 ROLE_MEASUREMENT = "measurement"
+# MEScan MethodTypes recorded as one movie: unset, time series, chessboard, transverse and longitudinal ribbons
+METHODS_MOVIE = (0, 1, 8, 9, 10)
 NAME_RESULTS = "masknmf_asap7"
 FIELDS_SACCT = "JobID,State,Elapsed,ExitCode"
 
@@ -34,6 +36,7 @@ class MescUnit(NamedTuple):
         frames (int): Frames in the unit's first channel
         fs (float | None): Frames per second, None when the unit declares no frame time
         comment (str): What the operator typed for the unit
+        method (int): MEScan's MethodType, e.g. 1 time series, 2 z-stack, 8 chessboard, 10 ribbon, 11 multicube
     """
 
     key: str
@@ -41,6 +44,7 @@ class MescUnit(NamedTuple):
     frames: int
     fs: Optional[float]
     comment: str
+    method: int = 0
 
     @property
     def seconds(self) -> Optional[float]:
@@ -49,19 +53,19 @@ class MescUnit(NamedTuple):
 
 @dataclasses.dataclass
 class Asap7Params:
-    """The settings asap7_spine.py takes besides the file and unit; defaults are the detrend notebook's."""
+    """The settings `mbo asap7` takes besides the file and unit; defaults are the detrend notebook's. channel is 1-based."""
 
-    channel: int = 0
-    exclude_initial_frames: int = 200
+    channel: int = 1
+    first_frame: int = 200
     mad_correlation_threshold: float = 0.6
     detrend_window_s: float = 0.3
 
     def problems(self) -> list[str]:
         found = []
-        if self.channel < 0:
-            found.append("the channel is 0 or more")
-        if self.exclude_initial_frames < 0:
-            found.append("frames excluded is 0 or more")
+        if self.channel < 1:
+            found.append("channels count from 1")
+        if self.first_frame < 0:
+            found.append("the first frame is 0 or more")
         if not 0 < self.mad_correlation_threshold <= 1:
             found.append("the MAD correlation threshold is between 0 and 1")
         if self.detrend_window_s <= 0:
@@ -106,6 +110,7 @@ def list_units(path: Path) -> list[MescUnit]:
                         frames=int(unit["Channel_0"].shape[0]),
                         fs=1000.0 / step_ms if step_ms > 0 else None,
                         comment=str(read_attr(unit, "Comment", "") or ""),
+                        method=int(read_attr(unit, "MethodType", 0) or 0),
                     )
                 )
     return units
@@ -118,8 +123,13 @@ def number(name: str) -> tuple[int, str]:
 
 
 def is_runnable(unit: MescUnit, params: Asap7Params) -> bool:
-    """Whether the pipeline can run on unit: a measurement with a frame rate and frames left after the excluded ones."""
-    return unit.role in (ROLE_MEASUREMENT, "") and unit.fs is not None and unit.frames > params.exclude_initial_frames
+    """Whether the pipeline can run on unit: a measured movie with a frame rate and frames left after the first frame."""
+    return (
+        unit.role in (ROLE_MEASUREMENT, "")
+        and unit.method in METHODS_MOVIE
+        and unit.fs is not None
+        and unit.frames > params.first_frame
+    )
 
 
 def find_mesc(sources: list[Path]) -> list[tuple[Path, str]]:
@@ -172,7 +182,7 @@ def sbatch_command(settings: Settings, job: Job, params: Asap7Params) -> str:
         mesc,
         job.unit,
         str(params.channel),
-        str(params.exclude_initial_frames),
+        str(params.first_frame),
         str(params.mad_correlation_threshold),
         str(params.detrend_window_s),
         dir_run,
@@ -184,7 +194,6 @@ def sbatch_command(settings: Settings, job: Job, params: Asap7Params) -> str:
             "&& sbatch",
             *map(shlex.quote, options),
             remote_path(f"{dir_asap7}/run_asap7.sh"),
-            remote_path(f"{dir_asap7}/asap7_spine.py"),
             *map(shlex.quote, arguments),
         ]
     )

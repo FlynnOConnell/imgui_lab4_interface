@@ -953,14 +953,14 @@ class Lab4App:
                 imgui.end_table()
             hidden = len(units) - len(runnable)
             if hidden:
-                imgui.text_disabled(f"{hidden} other unit(s) hidden: z-stacks, snapshots, RTMC streams, or too few frames")
-        self.subsection("Pipeline", "asap7_spine.py, the batch form of asap7_spine_pipeline_detrend.ipynb; defaults are the notebook's")
+                imgui.text_disabled(f"{hidden} other unit(s) hidden: volumes, z-stacks, line scans, snapshots, RTMC streams, or too few frames")
+        self.subsection("Pipeline", "mbo asap7, the batch form of asap7_spine_pipeline_detrend.ipynb; defaults are the notebook's")
         params = self.params
         if self.begin_form("asap7"):
             self.row("channel")
             _, params.channel = imgui.input_int("##channel", params.channel)
-            self.row("drop first")
-            _, params.exclude_initial_frames = imgui.input_int("##exclude", params.exclude_initial_frames, 50)
+            self.row("first frame")
+            _, params.first_frame = imgui.input_int("##first_frame", params.first_frame, 50)
             self.row("MAD threshold")
             _, params.mad_correlation_threshold = imgui.input_float("##mad", params.mad_correlation_threshold, 0.05, 0.1, "%.2f")
             self.row("detrend window")

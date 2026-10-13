@@ -39,7 +39,7 @@ class Settings:
         partition (str): The SLURM partition processing jobs run on, one with GPUs
         gres (str): The GPUs a processing job asks for, e.g. gpu:1; empty asks for none
         email (str): Where SLURM writes when a processing job ends or fails; empty for no mail
-        dir_asap7 (str): The folder on BioHPC holding run_asap7.sh and asap7_spine.py; ~/ is the BioHPC home
+        dir_asap7 (str): The folder on BioHPC holding run_asap7.sh, which runs `mbo asap7`; ~/ is the BioHPC home
         cluster_root (str): Where mount_base is on BioHPC's own nodes, e.g. the lab's /project folder the /biohpc share mounts
     """
 
