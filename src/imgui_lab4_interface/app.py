@@ -6,8 +6,12 @@ ssh link never stalls a frame.
 
 import copy
 import json
+import os
 import posixpath
 import shutil
+import subprocess
+import sys
+from collections import Counter
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
@@ -19,11 +23,12 @@ from imgui_bundle import icons_fontawesome_6 as fa
 from imgui_bundle import portable_file_dialogs as pfd
 
 from imgui_lab4_interface import __version__, lab4, processing, viewers
-from imgui_lab4_interface.catalog import KINDS, Catalog
+from imgui_lab4_interface.catalog import KINDS, Catalog, classify_file
 from imgui_lab4_interface.config import BACKENDS, Settings, data_dir
 from imgui_lab4_interface.database import BIOHPC, Credentials, Lab4Database, Schema, secrets_path
 from imgui_lab4_interface.processing import Asap7Params, Job, MescUnit
-from imgui_lab4_interface.storage import SIDECAR_SUFFIX, Entry, Mount, SshStorage, Transfer, destination_state, find_mounts, open_storage, write_text
+from imgui_lab4_interface.slices import ADMIN, COLUMNS, PEOPLE, ROOT, SliceDatabase, can_edit, file_dates, locked, match_files
+from imgui_lab4_interface.storage import SIDECAR_SUFFIX, Entry, Mount, SshStorage, Transfer, destination_state, download, find_mounts, open_storage, write_text
 
 ACCENT = imgui.ImVec4(0.40, 0.68, 1.00, 1.0)
 KEY = imgui.ImVec4(1.00, 0.80, 0.20, 1.0)
@@ -65,9 +70,18 @@ PAGES = (
     ("home", fa.ICON_FA_HOUSE, "Overview", "what this window does and where data lands"),
     ("transfer", fa.ICON_FA_CLOUD_ARROW_UP, "Transfer", "copy files or folders into a BioHPC folder, metadata beside them"),
     ("browse", fa.ICON_FA_SITEMAP, "Browse storage", "look through BioHPC folders, catalog them, open datasets and attach metadata"),
+    ("slices", fa.ICON_FA_TABLE, "Human slices", "what was done to each human slice, from collection to assay (demo data)"),
     ("settings", fa.ICON_FA_GEAR, "Settings", "how this machine reaches BioHPC, where data goes, and what opens it"),
 )
 # the files a transfer writes
+# the color of a slice's outcome and incubator state in the table
+COLORS_SLICE = {"ok": OK, "failed": ERROR, "in incubator": ACCENT, "out, recorded": OK, "out, imaged": CODE, "out, fixed": KEY}
+# the icon a file under the slice data shows, by extension
+ICONS_FILE = {
+    ".mesc": fa.ICON_FA_FILE_IMAGE, ".tif": fa.ICON_FA_FILE_IMAGE, ".tiff": fa.ICON_FA_FILE_IMAGE, ".png": fa.ICON_FA_FILE_IMAGE,
+    ".avi": fa.ICON_FA_FILE_VIDEO, ".mp4": fa.ICON_FA_FILE_VIDEO, ".pdf": fa.ICON_FA_FILE_PDF,
+    ".pxp": fa.ICON_FA_CHART_LINE, ".nwb": fa.ICON_FA_CHART_LINE,
+}
 FILES = (
     ("<name>", "each file or folder picked, copied as is under the destination folder"),
     (f"<name>{SIDECAR_SUFFIX}", "the recording's Lab4 key, acquisition, notes and extra fields, beside it"),
@@ -184,6 +198,38 @@ class Lab4App:
         # what the catalog knows of the browse folder: its summary, the scan covering it, and its items by name
         self.described: dict = {"folder": None, "scan": None, "items": {}}
         self.count_scanned = 0
+        self.slices = SliceDatabase()
+        if self.slices.moved_aside is not None:
+            self.message = f"the slice table changed shape; the old one is kept whole at {self.slices.moved_aside}"
+        self.tab_slices = "slices"
+        # who edits the slice tables: the demo signs everyone in as one user, so the page picks who to act as
+        self.user_slices = ADMIN
+        # a tab to switch to on the next frame, as a patient's Show its slices does
+        self.tab_request: Optional[str] = None
+        self.rows_slices = {table: self.slices.rows(table) for table in COLUMNS}
+        self.filter_slices = {table: "" for table in COLUMNS}
+        # each table's sort, most significant column first
+        self.sort_slices: dict[str, list[tuple[str, bool]]] = {table: [] for table in COLUMNS}
+        self.order_slices: dict[str, list[dict]] = {table: [] for table in COLUMNS}
+        self.picked: dict[str, set[int]] = {table: set() for table in COLUMNS}
+        self.anchor: dict[str, Optional[int]] = {table: None for table in COLUMNS}
+        # the cell being edited (table, row id, column), what is typed into it, and whether it takes focus next frame
+        self.editing: Optional[tuple[str, int, str]] = None
+        self.text_edit = ""
+        self.focus_edit = False
+        self.open_choice = False
+        # a row to bring into view once it is drawn, as a new or copied row
+        self.scroll_slices: Optional[int] = None
+        # the last index of the files under ROOT, when and over what it was taken, and why the latest one failed
+        self.files_index, self.indexed = self.slices.files()
+        self.error_index = ""
+        # a file being copied down to open: its paths, kind, and the bytes done of total
+        self.fetch: Optional[dict] = None
+        self.saver = None
+        # the question in front of a change to files or rows: title, lines, the button, and what it runs
+        self.confirm: Optional[dict] = None
+        for table in COLUMNS:
+            self.order_rows(table=table)
         self.executor = ThreadPoolExecutor(max_workers=3)
         self.futures: dict[str, Future] = {}
         self.picker = None
@@ -282,6 +328,7 @@ class Lab4App:
         self.submit("check", self.storage.check)
         self.browse(path=self.path_browse)
         self.dest_checked = ""
+        self.submit("files_index", self.slices.index_files, self.storage)
 
     def browse(self, path: str) -> None:
         self.path_browse = path.rstrip("/") or "/"
@@ -303,17 +350,117 @@ class Lab4App:
     def open_dataset(self, path: str, kind: str) -> None:
         """Start the viewer kind calls for on path, reporting the outcome in the footer."""
         local = self.storage.local_path(path)
-        self.failed = True
         if local is None:
-            self.message = "opening needs the share mounted on this machine; ssh only lists it"
+            self.message, self.failed = "opening needs the share mounted on this machine; ssh only lists it", True
             return
+        self.open_local(local=local, kind=kind)
+
+    def open_local(self, local: Path, kind: Optional[str]) -> None:
+        """Open a file on this machine in the viewer its kind calls for, or in its default app when it has no kind."""
+        self.failed = True
         try:
-            log = viewers.launch(viewers.command(self.settings, kind, local))
+            if kind is not None:
+                log = viewers.launch(viewers.command(self.settings, kind, local))
+                self.message = f"opened {local.name} in {KINDS[kind][0]}; its output goes to {log}"
+            elif sys.platform == "win32":
+                os.startfile(local)
+                self.message = f"opened {local.name} in its default app"
+            else:
+                subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(local)])
+                self.message = f"opened {local.name} in its default app"
         except OSError as e:
             self.message = str(e)
             return
         self.failed = False
-        self.message = f"opened {posixpath.basename(path)} in {KINDS[kind][0]}; its output goes to {log}"
+
+    def open_file(self, path: str, size: int) -> None:
+        """
+        Open a file under ROOT: in place when the share is mounted, else from a copy in this machine's cache, which
+        is made only after asking.
+        """
+        remote = f"{ROOT}/{path}"
+        name = posixpath.basename(remote)
+        kind = classify_file(name)
+        local = self.storage.local_path(remote)
+        if local is not None:
+            self.open_local(local=local, kind=kind)
+            return
+        cached = data_dir() / "cache" / remote.lstrip("/")
+        if cached.is_file() and cached.stat().st_size == size:
+            self.open_local(local=cached, kind=kind)
+            return
+        lines = [
+            f"{name}, {human_bytes(size)}",
+            f"from {self.storage.label}: {remote}",
+            f"to {cached}",
+            f"then open it in {KINDS[kind][0] if kind else 'its default app'}. Nothing on BioHPC changes.",
+        ]
+        if cached.exists():
+            lines.append("An older copy in the cache is replaced.")
+        self.confirm = {"title": "Copy to this machine?", "lines": lines, "button": "Copy and open", "run": self.start_fetch, "args": (remote, cached, kind, size)}
+
+    def start_fetch(self, remote: str, cached: Path, kind: Optional[str], size: int) -> None:
+        self.fetch = {"remote": remote, "local": cached, "kind": kind, "done": 0, "total": size}
+        self.submit("download", download, self.storage, remote, cached, self.fetch)
+
+    def send(self, transfer: Transfer, pending: list[Job], params: Asap7Params) -> None:
+        self.transfer = transfer
+        self.pending = pending
+        self.pending_params = params
+        self.submit("transfer", transfer.run)
+
+    def delete_rows(self, table: str, ids: list[int]) -> None:
+        try:
+            self.slices.delete(table, ids, self.user_slices)
+        except ValueError as e:
+            self.message, self.failed = str(e), True
+            return
+        self.message, self.failed = f"deleted {len(ids)} row(s) from {table}", False
+        self.picked[table].clear()
+        self.reload_slices()
+
+    def reset_slices(self) -> None:
+        self.slices.reset()
+        self.editing = None
+        self.reload_slices()
+        self.message, self.failed = "rows reset to the ones read off the file names", False
+
+    def order_rows(self, table: str) -> None:
+        """
+        The rows of a slices table shown: those holding every word of its filter, a column:value word only in that
+        column, sorted by the headers' columns (shift-click adds one) with empty cells last.
+        """
+        names = [name for name, _, _ in COLUMNS[table]]
+        rows = self.rows_slices[table]
+        for term in self.filter_slices[table].lower().split():
+            column, _, value = term.partition(":")
+            if value and column in names:
+                rows = [r for r in rows if r[column] is not None and value in str(r[column]).lower()]
+            else:
+                rows = [r for r in rows if any(r[n] is not None and term in str(r[n]).lower() for n in names)]
+        for column, ascending in reversed(self.sort_slices[table]):
+            filled = sorted((r for r in rows if r[column] is not None), key=lambda r: r[column], reverse=not ascending)
+            rows = filled + [r for r in rows if r[column] is None]
+        self.order_slices[table] = rows
+
+    def reload_slices(self) -> None:
+        """Read both slice tables again, keeping each one's filter, sort and the picked rows still there."""
+        for table in COLUMNS:
+            self.rows_slices[table] = self.slices.rows(table)
+            self.picked[table] &= {r["id"] for r in self.rows_slices[table]}
+            self.order_rows(table=table)
+
+    def commit_edit(self, text: str) -> None:
+        """Write the edited cell, reporting a value that does not fit its column in the footer."""
+        table, id_, column = self.editing
+        self.editing = None
+        try:
+            self.slices.update(table, id_, column, text, self.user_slices)
+        except ValueError as e:
+            self.message, self.failed = str(e), True
+            return
+        self.message, self.failed = f"{column} set to {text.strip() or 'empty'}", False
+        self.reload_slices()
 
     def select(self, name: str) -> None:
         self.selected = name
@@ -370,6 +517,16 @@ class Lab4App:
                 self.message = f"scan failed: {error}" if found is None else f"catalogued {found['datasets']} datasets in {found['records']} items under {found['root']} ({found['seconds']:.1f} s)"
                 self.failed = found is None
                 self.describe()
+            elif name == "files_index":
+                if error is None:
+                    self.files_index, self.indexed = future.result()
+                self.error_index = "" if error is None else str(error)
+            elif name == "download":
+                if error is None:
+                    self.open_local(local=self.fetch["local"], kind=self.fetch["kind"])
+                else:
+                    self.message, self.failed = f"copy failed: {error}", True
+                self.fetch = None
             elif name == "sidecar":
                 self.sidecar = "" if error is not None else future.result()
             elif name == "attach":
@@ -413,6 +570,16 @@ class Lab4App:
             elif name == "picker":
                 self.picker_entries = [] if error is not None else [e for e in future.result() if e.is_dir]
                 self.picker_error = "" if error is None else str(error)
+        if self.saver is not None and self.saver.ready():
+            chosen = self.saver.result()
+            self.saver = None
+            if chosen:
+                try:
+                    self.slices.export(self.tab_slices, Path(chosen))
+                except OSError as e:
+                    self.message, self.failed = str(e), True
+                else:
+                    self.message, self.failed = f"wrote {len(self.rows_slices[self.tab_slices])} {self.tab_slices} to {chosen}", False
         if self.picker is not None and self.picker.ready():
             chosen = self.picker.result()
             chosen = chosen if isinstance(chosen, list) else [chosen]
@@ -547,6 +714,8 @@ class Lab4App:
             return f"{fa.ICON_FA_TAGS}  Attach metadata"
         if self.page == "settings":
             return f"{fa.ICON_FA_FLOPPY_DISK}  Save"
+        if self.page == "slices":
+            return f"{fa.ICON_FA_DOWNLOAD}  Export {self.tab_slices} to csv"
         return None
 
     def act(self) -> None:
@@ -554,18 +723,38 @@ class Lab4App:
         if self.page == "transfer":
             metadata = self.recording.sidecar(user=self.user) if self.attach else None
             sources = [Path(s) for s in self.sources]
-            self.transfer = Transfer(self.storage, sources, self.destination(), metadata, self.overwrite)
-            self.pending = self.jobs_to_send() if self.process else []
-            self.pending_params = copy.deepcopy(self.params)
-            self.submit("transfer", self.transfer.run)
+            dest = self.destination()
+            lines = [f"to {dest} on {self.storage.label}:"]
+            for source in sources:
+                size = sum(f.stat().st_size for f in source.rglob("*") if f.is_file()) if source.is_dir() else source.stat().st_size
+                lines.append(f"  {source}  ->  {dest}/{source.name}  ({human_bytes(size)})")
+                if metadata is not None:
+                    lines.append(f"  and {dest}/{source.name}{SIDECAR_SUFFIX}")
+            if self.overwrite:
+                lines.append("Overwrite is ticked: anything already at these paths is replaced.")
+            else:
+                lines.append("Nothing already there is touched: the send stops if any of these paths exists.")
+            lines.append("The sources on this machine are only read.")
+            transfer = Transfer(self.storage, sources, dest, metadata, self.overwrite)
+            pending = self.jobs_to_send() if self.process else []
+            if pending:
+                lines.append(f"Once it lands, {len(pending)} processing job(s) are submitted on {self.settings.partition}.")
+            args = (transfer, pending, copy.deepcopy(self.params))
+            self.confirm = {"title": "Send to BioHPC?", "lines": lines, "button": "Send", "run": self.send, "args": args}
         elif self.page == "browse":
             path = f"{self.path_browse.rstrip('/')}/{self.selected}{SIDECAR_SUFFIX}"
             text = json.dumps({**self.recording.sidecar(user=self.user), "source": f"{self.path_browse.rstrip('/')}/{self.selected}"}, indent=2)
-            self.submit("attach", write_text, self.storage, path, text)
+            lines = [f"write {path}", f"on {self.storage.label}; {self.selected} itself is not touched."]
+            if f"{self.selected}{SIDECAR_SUFFIX}" in {e.name for e in self.entries}:
+                lines.append("A metadata file is already there and is replaced.")
+            self.confirm = {"title": "Attach metadata?", "lines": lines, "button": "Write", "run": self.submit, "args": ("attach", write_text, self.storage, path, text)}
         elif self.page == "settings":
             self.settings.save()
             self.connect()
             self.message = f"saved to {data_dir() / 'settings.json'}"
+        elif self.page == "slices" and self.saver is None:
+            # the system save dialog asks before replacing a file that is there
+            self.saver = pfd.save_file(f"Export {self.tab_slices}", str(Path.home() / f"{self.tab_slices}.csv"), ["CSV", "*.csv"])
 
     def draw_header(self) -> None:
         """The name and version, who is signed in and whether storage answers, then what this does."""
@@ -602,7 +791,7 @@ class Lab4App:
         if not self.user:
             self.draw_login()
             return
-        if imgui.is_key_pressed(imgui.Key.escape) and not imgui.is_any_item_active():
+        if imgui.is_key_pressed(imgui.Key.escape) and not imgui.is_any_item_active() and not imgui.is_popup_open("", imgui.PopupFlags_.any_popup_id):
             self.page = "home"
         em = imgui.get_font_size()
         avail = imgui.get_content_region_avail()
@@ -617,6 +806,25 @@ class Lab4App:
         with imgui_ctx.begin_child("##content", imgui.ImVec2(0, avail.y), imgui.ChildFlags_.always_use_window_padding):
             self.draw_content()
         imgui.pop_style_var()
+        if self.confirm is not None and not imgui.is_popup_open("###confirm"):
+            imgui.open_popup("###confirm")
+        if imgui.begin_popup_modal(f"{self.confirm['title'] if self.confirm else ''}###confirm", None, imgui.WindowFlags_.always_auto_resize)[0]:
+            if self.confirm is None:
+                imgui.close_current_popup()
+            else:
+                for line in self.confirm["lines"]:
+                    imgui.text(line)
+                imgui.dummy(imgui.ImVec2(0, 0.4 * em))
+                idl.push_button_style(THEME, primary=True)
+                go = imgui.button(self.confirm["button"], imgui.ImVec2(8 * em, 0))
+                idl.pop_button_style()
+                imgui.same_line()
+                if go:
+                    self.confirm["run"](*self.confirm["args"])
+                if go or imgui.button("Cancel", imgui.ImVec2(8 * em, 0)) or imgui.is_key_pressed(imgui.Key.escape):
+                    self.confirm = None
+                    imgui.close_current_popup()
+            imgui.end_popup()
 
     def draw_login(self) -> None:
         """A centered card: the credentials file and who it signs in as, Sign In, or work offline."""
@@ -720,6 +928,8 @@ class Lab4App:
             self.draw_transfer()
         elif key == "browse":
             self.draw_browse()
+        elif key == "slices":
+            self.draw_slices()
         else:
             self.draw_settings()
 
@@ -789,7 +999,7 @@ class Lab4App:
         em = imgui.get_font_size()
         w = imgui.get_content_region_avail().x
         gap = 1.0 * em
-        cards = [page for page in PAGES if page[0] in ("transfer", "browse")]
+        cards = [page for page in PAGES if page[0] in ("transfer", "browse", "slices")]
         width = (w - gap * (len(cards) - 1)) / len(cards)
         for i, (key, icon, name, hint) in enumerate(cards):
             if i:
@@ -801,7 +1011,9 @@ class Lab4App:
             "On Transfer, pick files, a BioHPC folder and the recording's metadata, and send: the data is copied as is "
             "and a sidecar holding its Lab4 key lands beside it. Browse storage attaches the same sidecar to data "
             "already on BioHPC, registers a converted .h5 as the recording's data in Lab4, and opens datasets in mbo or "
-            "masknmf; its Scan catalogs a folder so each item shows what it holds.",
+            "masknmf; its Scan catalogs a folder so each item shows what it holds. Human slices tracks each slice from "
+            "the patient it came from through electroporation, ephys and the incubator, failed ones included, for now "
+            "with made-up data.",
             DIM,
         )
         flags = imgui.TableFlags_.row_bg | imgui.TableFlags_.borders_inner_h
@@ -1287,6 +1499,355 @@ class Lab4App:
             imgui.end_tab_bar()
         imgui.dummy(imgui.ImVec2(0, 0.6 * imgui.get_font_size()))
         draw_wrapped(f"Save writes every tab to {data_dir() / 'settings.json'}", DIM)
+
+    def draw_slices(self) -> None:
+        """
+        The slices, patients and assays tables in tabs: add, copy and delete rows, filter them, sort, move and hide
+        columns from the headers, and double-click a cell to edit it. Rows someone else added are locked; the picked
+        row's patient, what was done to the slice, its assays and the files in its data folder show below.
+        """
+        em = imgui.get_font_size()
+        if imgui.begin_tab_bar("##slice_tabs"):
+            for table in COLUMNS:
+                flags = imgui.TabItemFlags_.set_selected if self.tab_request == table else 0
+                selected, _ = imgui.begin_tab_item(f"{table.capitalize()} ({len(self.rows_slices[table])})###tab_{table}", None, flags)
+                if selected:
+                    if self.tab_slices != table:
+                        self.editing = None
+                    self.tab_slices = table
+                    imgui.end_tab_item()
+            imgui.end_tab_bar()
+        self.tab_request = None
+        table = self.tab_slices
+        columns = COLUMNS[table]
+        picked = self.picked[table]
+        rows_picked = [r for r in self.rows_slices[table] if r["id"] in picked]
+
+        if imgui.button(f"{fa.ICON_FA_PLUS}  Add"):
+            if table == "slices":
+                parent = rows_picked[0]["patient_id"] if rows_picked else ""
+            elif table == "assays":
+                parent = rows_picked[0]["slice_id"] if rows_picked else next((r["slice_id"] for r in self.rows_slices["slices"] if r["id"] in self.picked["slices"]), "")
+            else:
+                parent = ""
+            id_ = self.slices.add(table, self.user_slices, parent)
+            self.reload_slices()
+            picked.clear()
+            picked.add(id_)
+            self.scroll_slices = id_
+            self.message, self.failed = f"added a row to {table} as {self.user_slices}; double-click its cells to fill them in", False
+        if imgui.is_item_hovered():
+            hints = {
+                "slices": "a new slice under the picked slice's patient, or the newest patient",
+                "patients": "a new patient with the next free id",
+                "assays": "a new assay on the picked assay's slice, or on the slice picked on Slices",
+            }
+            idl.wrapped_tooltip(hints[table])
+        imgui.same_line()
+        imgui.begin_disabled(not picked)
+        if imgui.button(f"{fa.ICON_FA_COPY}  Duplicate"):
+            made = self.slices.duplicate(table, sorted(picked), self.user_slices)
+            self.reload_slices()
+            picked.clear()
+            picked.update(made)
+            self.scroll_slices = made[0] if made else None
+            self.message, self.failed = f"copied {len(made)} row(s) as {self.user_slices}'s", False
+        imgui.same_line()
+        pressed = imgui.is_key_pressed(imgui.Key.delete) and not imgui.is_any_item_active() and not imgui.is_popup_open("", imgui.PopupFlags_.any_popup_id)
+        if imgui.button(f"{fa.ICON_FA_TRASH}  Delete") or (picked and pressed):
+            key = "patient_id" if table == "patients" else "slice_id"
+            names = [str(r[key]) for r in rows_picked]
+            lines = [f"{len(names)} row(s) from {table}: {', '.join(names[:8])}{' ...' if len(names) > 8 else ''}", f"in {self.slices.path}", "No data file on BioHPC or this machine is touched."]
+            self.confirm = {"title": "Delete rows?", "lines": lines, "button": "Delete", "run": self.delete_rows, "args": (table, sorted(picked))}
+        if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
+            idl.wrapped_tooltip("delete the picked rows; the Delete key does the same. Failed slices are kept: set their outcome instead")
+        imgui.end_disabled()
+        if table in ("patients", "slices"):
+            below, key = ("slices", "patient_id") if table == "patients" else ("assays", "slice_id")
+            imgui.same_line()
+            imgui.begin_disabled(len(rows_picked) != 1)
+            if imgui.button(f"{fa.ICON_FA_ARROW_RIGHT}  Show its {below}"):
+                self.filter_slices[below] = f"{key}:{rows_picked[0][key]}"
+                self.order_rows(table=below)
+                self.tab_request = below
+            imgui.end_disabled()
+        text_reset = f"{fa.ICON_FA_ARROWS_ROTATE}  Reset rows"
+        spacing = imgui.get_style().item_spacing.x
+        width_user = 8 * em
+        room = imgui.get_content_region_avail().x - imgui.calc_text_size(text_reset).x - 2 * imgui.get_style().frame_padding.x
+        room -= width_user + imgui.calc_text_size("acting as").x + 3 * spacing
+        imgui.same_line()
+        imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + max(0.0, room))
+        imgui.align_text_to_frame_padding()
+        imgui.text_disabled("acting as")
+        imgui.same_line()
+        imgui.set_next_item_width(width_user)
+        changed, index = imgui.combo("##user_slices", PEOPLE.index(self.user_slices), PEOPLE)
+        if changed:
+            self.user_slices = PEOPLE[index]
+            self.editing = None
+        if imgui.is_item_hovered():
+            idl.wrapped_tooltip(f"{ADMIN} is the admin and edits every row; everyone else adds rows of their own and edits only those")
+        imgui.same_line()
+        if imgui.button(text_reset):
+            lines = [
+                f"Every row of patients, slices and assays in {self.slices.path} is thrown away,",
+                "and the rows read off the file names come back. Edits and added rows are lost.",
+                "No data file on BioHPC or this machine is touched.",
+            ]
+            self.confirm = {"title": "Reset the rows?", "lines": lines, "button": "Reset", "run": self.reset_slices, "args": ()}
+
+        imgui.set_next_item_width(-1)
+        hints = {"slices": "outcome:failed ephys:synaptic day:2", "patients": "diagnosis:epilepsy sex:f", "assays": "assay:live-dead owner:dana"}
+        changed, self.filter_slices[table] = imgui.input_text_with_hint("##filter", f"{fa.ICON_FA_FILTER}  words, or column:value as {hints[table]}", self.filter_slices[table])
+        if changed:
+            self.order_rows(table=table)
+        order = self.order_slices[table]
+        line = f"{len(order)} of {len(self.rows_slices[table])} {table}"
+        line += f" · {len(picked)} picked" if picked else ""
+        if table == "slices" and order:
+            line += f" · {summarize(Counter(r['outcome'] for r in order if r['outcome']))}"
+        locked = sum(not can_edit(r["owner"], self.user_slices) for r in order)
+        line += f" · {locked} locked to {self.user_slices}" if locked else ""
+        imgui.text_disabled(line)
+
+        flags = (
+            imgui.TableFlags_.sortable
+            | imgui.TableFlags_.sort_multi
+            | imgui.TableFlags_.sort_tristate
+            | imgui.TableFlags_.row_bg
+            | imgui.TableFlags_.borders_inner_v
+            | imgui.TableFlags_.resizable
+            | imgui.TableFlags_.reorderable
+            | imgui.TableFlags_.hideable
+            | imgui.TableFlags_.scroll_x
+            | imgui.TableFlags_.scroll_y
+            | imgui.TableFlags_.sizing_fixed_fit
+        )
+        height = max(8 * em, imgui.get_content_region_avail().y - 11 * em)
+        if imgui.begin_table(f"##db_{table}", len(columns), flags, imgui.ImVec2(0, height)):
+            imgui.table_setup_scroll_freeze(1, 1)
+            for i, (name, _, _) in enumerate(columns):
+                # slices sort by collection date, region, patient and day until a header says otherwise
+                flags_column = imgui.TableColumnFlags_.default_sort if table == "slices" and i < 4 else 0
+                imgui.table_setup_column(name, flags_column | (imgui.TableColumnFlags_.no_hide if i == 0 else 0))
+            imgui.table_headers_row()
+            specs = imgui.table_get_sort_specs()
+            if specs is not None and specs.specs_dirty:
+                self.sort_slices[table] = [
+                    (columns[specs.get_specs(n).column_index][0], specs.get_specs(n).sort_direction == imgui.SortDirection.ascending)
+                    for n in range(specs.specs_count)
+                ]
+                specs.specs_dirty = False
+                self.order_rows(table=table)
+                order = self.order_slices[table]
+            hits = [i for i, row in enumerate(order) if row["id"] == self.scroll_slices]
+            clipper = imgui.ListClipper()
+            clipper.begin(len(order))
+            if hits:
+                clipper.include_item_by_index(hits[0])
+            while clipper.step():
+                for i in range(clipper.display_start, clipper.display_end):
+                    row = order[i]
+                    imgui.table_next_row()
+                    for c, (name, kind, _) in enumerate(columns):
+                        if not imgui.table_set_column_index(c):
+                            continue
+                        value = row[name]
+                        if c == 0:
+                            x = imgui.get_cursor_pos_x()
+                            flags_row = imgui.SelectableFlags_.span_all_columns | imgui.SelectableFlags_.allow_overlap
+                            clicked, _ = imgui.selectable(f"##row_{row['id']}", row["id"] in picked, flags_row)
+                            if hits and i == hits[0]:
+                                imgui.set_scroll_here_y(0.5)
+                                self.scroll_slices = None
+                            if clicked:
+                                io = imgui.get_io()
+                                ids = [r["id"] for r in order]
+                                if io.key_ctrl:
+                                    picked ^= {row["id"]}
+                                elif io.key_shift and self.anchor[table] in ids:
+                                    lo, hi = sorted((ids.index(self.anchor[table]), i))
+                                    picked.update(ids[lo : hi + 1])
+                                else:
+                                    picked.clear()
+                                    picked.add(row["id"])
+                                if not io.key_shift:
+                                    self.anchor[table] = row["id"]
+                                column = imgui.table_get_hovered_column()
+                                if imgui.is_mouse_double_clicked(imgui.MouseButton_.left) and 0 <= column < len(columns):
+                                    name_edit, kind_edit, _ = columns[column]
+                                    if kind_edit == "joined":
+                                        self.message, self.failed = f"{name_edit} comes from the patient; edit it on Patients", True
+                                    elif kind_edit == "owner":
+                                        self.message, self.failed = "owner is who added the row and does not change", True
+                                    elif not can_edit(row["owner"], self.user_slices):
+                                        self.message, self.failed = f"this row is {row['owner']}'s and locked to {self.user_slices}; {locked(row['owner'])}", True
+                                    else:
+                                        self.editing = (table, row["id"], name_edit)
+                                        self.text_edit = "" if row[name_edit] is None else str(row[name_edit])
+                                        self.focus_edit = True
+                                        self.open_choice = kind_edit in ("choice", "ref")
+                            imgui.same_line()
+                            imgui.set_cursor_pos_x(x)
+                            if not can_edit(row["owner"], self.user_slices):
+                                imgui.text_colored(DIM, fa.ICON_FA_LOCK)
+                                imgui.same_line()
+                        editing = self.editing == (table, row["id"], name)
+                        if editing and kind not in ("choice", "ref"):
+                            if self.focus_edit:
+                                imgui.set_keyboard_focus_here()
+                                self.focus_edit = False
+                            imgui.set_next_item_width(max(imgui.get_content_region_avail().x, 8 * em))
+                            flags_edit = imgui.InputTextFlags_.enter_returns_true | imgui.InputTextFlags_.auto_select_all
+                            entered, self.text_edit = imgui.input_text("##edit", self.text_edit, flags_edit)
+                            if entered or imgui.is_item_deactivated_after_edit():
+                                self.commit_edit(text=self.text_edit)
+                            elif imgui.is_item_deactivated():
+                                self.editing = None
+                        elif value is None or value == "":
+                            imgui.text("")
+                        elif editing:
+                            imgui.text_colored(ACCENT, str(value))
+                        elif name in ("outcome", "incubator"):
+                            imgui.text_colored(COLORS_SLICE.get(value, TEXT), value)
+                        elif name == "failure_reason":
+                            imgui.text_colored(WARN, value)
+                        elif kind == "day":
+                            imgui.text(f"Day {value}")
+                        elif kind == "id":
+                            imgui.text_colored(KEY, value)
+                        elif kind == "ref" or name == "data_path":
+                            imgui.text_colored(PATH, value)
+                        elif kind == "owner":
+                            imgui.text_disabled(value)
+                        else:
+                            imgui.text(str(value))
+                        if kind == "text" and value and imgui.is_item_hovered():
+                            idl.wrapped_tooltip(value)
+            imgui.end_table()
+
+        if self.open_choice:
+            imgui.open_popup("##choice")
+            self.open_choice = False
+        if imgui.begin_popup("##choice"):
+            if self.editing is None:
+                imgui.close_current_popup()
+            else:
+                _, kind, choices = next(column for column in COLUMNS[self.editing[0]] if column[0] == self.editing[2])
+                imgui.text_disabled(self.editing[2])
+                imgui.separator()
+                for option in [r[self.editing[2]] for r in self.rows_slices[choices]] if kind == "ref" else choices:
+                    if imgui.selectable(option, option == self.text_edit)[0]:
+                        self.commit_edit(text=option)
+            imgui.end_popup()
+        elif self.editing is not None and next(column[1] for column in COLUMNS[self.editing[0]] if column[0] == self.editing[2]) in ("choice", "ref"):
+            self.editing = None
+
+        row = rows_picked[0] if len(rows_picked) == 1 else None
+        slice_ = None
+        if row is not None and table != "patients":
+            slice_ = row if table == "slices" else next((s for s in self.rows_slices["slices"] if s["slice_id"] == row["slice_id"]), None)
+        claimed: set[str] = set()
+        files: list[dict] = []
+        heading = ""
+        if slice_ is not None:
+            files = match_files(self.files_index, slice_["file_match"] or "")
+            heading = f"{len(files)} files match {slice_['file_match']}" if slice_["file_match"] else "no file_match yet; double-click that cell to set one"
+        elif row is not None and row["collection_date"]:
+            for s in self.rows_slices["slices"]:
+                if s["patient_id"] == row["patient_id"]:
+                    claimed |= {f["path"] for f in match_files(self.files_index, s["file_match"] or "")}
+            files = [f for f in self.files_index if row["collection_date"] in file_dates(f["path"])]
+            heading = f"{len(files)} files dated {row['collection_date']}, {sum(f['path'] not in claimed for f in files)} matching no slice"
+
+        flags_detail = imgui.TableFlags_.sizing_stretch_same | imgui.TableFlags_.borders_inner_v
+        if not imgui.begin_table("##slice_detail", 2, flags_detail, imgui.ImVec2(0, imgui.get_content_region_avail().y)):
+            return
+        imgui.table_next_row()
+        imgui.table_next_column()
+        with imgui_ctx.begin_child("##slice_record"):
+            if row is None:
+                draw_wrapped("Pick one row to see its patient, what was done to the slice, its assays and its files on BioHPC.", DIM)
+                draw_wrapped(
+                    "Double-click a cell to edit it, ctrl or shift click to pick several, shift-click headers to sort by several, "
+                    "right-click a header to hide columns. A slice's file_match finds its files: every word must be in the path, "
+                    "a date matches however the name spells it, and -word keeps files out.",
+                    DIM,
+                )
+            elif table == "patients":
+                theirs = [s for s in self.rows_slices["slices"] if s["patient_id"] == row["patient_id"]]
+                draw_wrapped(f"{fa.ICON_FA_USER}  {row['patient_id']}: {row['age'] or '?'} y {row['sex'] or '?'}, {row['diagnosis'] or 'diagnosis not set'}, collected {row['collection_date']}")
+                outcomes = summarize(Counter(s["outcome"] for s in theirs if s["outcome"]))
+                days = summarize(Counter(f"on Day {s['day']}" for s in theirs if s["day"] is not None))
+                draw_wrapped(f"{len(theirs)} slices{': ' + outcomes if outcomes else ''}{'; ' + days if days else ''}", DIM)
+                if row["notes"]:
+                    draw_wrapped(row["notes"], DIM)
+            elif slice_ is not None:
+                failed = f" ({slice_['failure_reason']})" if slice_["failure_reason"] else ""
+                day = f"Day {slice_['day']}" if slice_["day"] is not None else "day not set"
+                draw_wrapped(f"{fa.ICON_FA_TABLE}  {slice_['slice_id']}: {day}, {slice_['region'] or 'region not set'}, {slice_['outcome']}{failed}", COLORS_SLICE.get(slice_["outcome"], TEXT))
+                patient = next((p for p in self.rows_slices["patients"] if p["patient_id"] == slice_["patient_id"]), None)
+                if patient is not None:
+                    draw_wrapped(f"{fa.ICON_FA_USER}  {patient['patient_id']}, collected {patient['collection_date']}{', ' + patient['diagnosis'] if patient['diagnosis'] else ''}", DIM)
+                construct = f" {slice_['ep_construct']}" if slice_["ep_construct"] else ""
+                notes = f" ({slice_['ephys_notes']})" if slice_["ephys_notes"] else ""
+                draw_wrapped(f"electroporated {slice_['ep_material'] or '?'}{construct}, dye {slice_['ep_dye'] or '?'} · ephys {slice_['ephys'] or '?'}{notes} · {slice_['incubator'] or 'incubator not set'}", DIM)
+                for assay in [a for a in self.rows_slices["assays"] if a["slice_id"] == slice_["slice_id"]]:
+                    live = f"{assay['percent_live']}% live, " if assay["percent_live"] is not None else ""
+                    draw_wrapped(f"{fa.ICON_FA_FLASK}  {assay['assay']} {assay['assay_date'] or ''} by {assay['owner']}: {live}{assay['result'] or ''}", CODE)
+                if slice_["notes"]:
+                    draw_wrapped(slice_["notes"], DIM)
+                if slice_["source"]:
+                    draw_wrapped(f"from {slice_['source']}", DIM)
+        imgui.table_next_column()
+        with imgui_ctx.begin_child("##slice_files"):
+            indexing = "files_index" in self.futures
+            if self.indexed is None:
+                imgui.text_disabled("indexing..." if indexing else "not indexed yet")
+            else:
+                imgui.text_disabled(f"index of {len(self.files_index)} files from {self.indexed['indexed_at'].replace('T', ' ')} over {self.indexed['storage']}")
+            if imgui.is_item_hovered():
+                idl.wrapped_tooltip(f"every file under {ROOT}; listing it reads nothing and changes nothing")
+            imgui.same_line()
+            imgui.begin_disabled(indexing)
+            if imgui.small_button(f"{fa.ICON_FA_ARROWS_ROTATE}##index"):
+                self.submit("files_index", self.slices.index_files, self.storage)
+            imgui.end_disabled()
+            if self.error_index:
+                draw_wrapped(f"cannot index on {self.storage.label}: {self.error_index}", WARN)
+            if self.fetch is not None:
+                total = max(self.fetch["total"], 1)
+                imgui.progress_bar(self.fetch["done"] / total, imgui.ImVec2(-6 * em, 0), f"copying {self.fetch['local'].name}")
+                imgui.same_line()
+                if imgui.small_button("cancel##fetch"):
+                    self.fetch["cancelled"] = True
+            if heading:
+                imgui.text_colored(PATH, f"{fa.ICON_FA_FOLDER_OPEN}  {heading}")
+            copies: dict[tuple[str, int], list[str]] = {}
+            for f in files:
+                copies.setdefault((posixpath.basename(f["path"]), f["size"]), []).append(f["path"])
+            imgui.begin_disabled(self.fetch is not None)
+            for (name, size), paths in copies.items():
+                kind = classify_file(name)
+                icon = ICONS_FILE.get(posixpath.splitext(name)[1].lower(), fa.ICON_FA_FILE)
+                stray = bool(claimed) and not any(path in claimed for path in paths)
+                color = WARN if stray else KEY if kind is not None else None
+                if color is not None:
+                    imgui.push_style_color(imgui.Col_.text, color)
+                clicked, _ = imgui.selectable(f"{icon}  {name}##file_{paths[0]}", False)
+                if color is not None:
+                    imgui.pop_style_color()
+                if imgui.is_item_hovered():
+                    how = f"double-click to open in {KINDS[kind][0]}" if kind else "double-click to open in its default app"
+                    where = "\n".join(paths)
+                    idl.wrapped_tooltip(f"{how}{'; it matches no slice of this patient' if stray else ''}\n{where}")
+                if clicked and imgui.is_mouse_double_clicked(imgui.MouseButton_.left):
+                    self.open_file(path=paths[0], size=size)
+                imgui.same_line()
+                imgui.text_disabled(f"{human_bytes(size)}{f' · {len(paths)} copies' if len(paths) > 1 else ''}")
+            imgui.end_disabled()
+        imgui.end_table()
 
     def draw_connection(self) -> None:
         """The backend and how to reach it, with the mounts found on this machine."""

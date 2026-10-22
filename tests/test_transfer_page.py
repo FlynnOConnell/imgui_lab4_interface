@@ -37,6 +37,7 @@ def test_a_new_folder_is_made_on_send(tmp_path, monkeypatch):
     assert destination(app, "/biohpc/data2/M231/") == []
     assert app.dest_state == "new"
     app.act()
+    app.confirm["run"](*app.confirm["args"])
     settle(app)
     assert not app.failed, app.message
     assert (tmp_path / "mount" / "data2" / "M231" / "rec.tif").read_bytes() == b"tif"

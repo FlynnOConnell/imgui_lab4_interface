@@ -55,6 +55,16 @@ lab4
    masknmf; a dataset folder opens from **Open in** below the list. Selecting an `.h5` (what `lab4.convert` writes)
    offers **Register in Lab4**, which adds it as the recording's data, with its experiment group, subject and
    session when they are new, in one transaction.
+5. **Human slices.** The human slice prep table, seeded from Shobhana's file names on BioHPC
+   (`/biohpc/data4/Shobhana`): four collection dates and their slices; patient ids are placeholders until the
+   PowerPoints. Slices sort by collection date, region, patient and day post-slicing,
+   and hold electroporation (material, construct, dye), ephys, incubator and outcome; failed slices stay, with why.
+   Each slice's `file_match` finds its files in an index of that folder: every word must be in the path, a
+   `YYYY-MM-DD` word matches the date however the name spells it (`7-27-2026`, `260727`, `May21st_2026`), and
+   `-word` keeps files out. Pick a slice to see its files; a patient shows every file of its date and flags those no
+   slice claims. Double-click a file to open it: in place when the share is mounted, else from a copy in
+   `~/.imgui_lab4_interface/cache`, made after asking. Rows belong to whoever added them; `shobhana` is admin, and
+   *acting as* picks the user.
 
 Opening needs the share mounted (ssh storage only lists) and the viewers set in Settings, either names on
 `PATH` or full paths, e.g. `~/envs/pengui/.venv/Scripts/mbo.exe`.
@@ -75,6 +85,8 @@ Everything lives under `~/.imgui_lab4_interface/` (override with `IMGUI_LAB4_HOM
 | `recent.json` | recently added sources, shown in the rail |
 | `window.ini` | window layout |
 | `catalog.sqlite` | the catalog: `datasets`, `folders`, `metadata`, `scans` |
+| `slices.sqlite` | the human slice table: `patients`, `slices`, `assays`, and the `files` index |
+| `cache/` | files copied down from BioHPC to open, at their BioHPC paths |
 | `logs/` | output of each viewer opened |
 | `jobs.json` | every processing job submitted: job id, unit, `.mesc`, run folder, settings |
 
@@ -97,3 +109,22 @@ LAB4_SECRETS_PATH=.dev/secrets.json lab4
 
 Every test runs with `LAB4_SECRETS_PATH` pointed at a missing file. `tests/test_database.py` uses only the
 development database and skips when it is not running.
+
+## What changes files
+
+Nothing deletes, moves or renames anything on BioHPC or in your data; Transfer makes at most one new folder. Every
+action that writes a data file, or deletes rows, shows a dialog saying exactly what it writes or removes, and does
+nothing until its button is pressed:
+
+| action | writes | asks with |
+|--------|--------|-----------|
+| Transfer: Send | the sources and their sidecars at the destination, then the processing jobs ticked; with overwrite ticked, replaces what is there | Send to BioHPC? |
+| Browse: Attach metadata | `<name>.lab4.json`, saying when it replaces one | Attach metadata? |
+| Human slices: open a file over ssh | a copy in `cache/`; BioHPC is only read | Copy to this machine? |
+| Human slices: Export | the csv where you choose | the system save dialog, which asks before replacing |
+| Human slices: Delete, Reset rows | rows in `slices.sqlite` only | Delete rows?, Reset the rows? |
+
+Editing a cell writes that one value to `slices.sqlite` as you press Enter. The window's own files (`settings.json`
+on Save, `recent.json`, `window.ini`, `catalog.sqlite` on Scan, `logs/`, `jobs.json`) are written without asking. A
+`slices.sqlite` from an older version is kept whole as `slices.v<N>.sqlite`, never dropped. Files opened in place
+on a mounted share are handed to mbo or their default app; what that app does with them is up to it.

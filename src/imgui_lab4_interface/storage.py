@@ -5,6 +5,9 @@ that copies local files into one.
 Paths given to a Storage are always BioHPC's own posix paths (/biohpc/data2/...), the paths Lab4 stores; each backend maps them
 to whatever it talks to. The window only ever sees the protocol, so a remote backend (an http service, Globus)
 slots in by implementing it.
+
+Nothing here deletes, moves or renames anything on storage. The ways to change it are open_write and mkdir, and the
+window asks before every call that reaches them (Transfer, attaching a sidecar).
 """
 
 import json
@@ -55,6 +58,9 @@ class Storage(Protocol):
     def mkdir(self, path: str) -> None:
         """Make the folder when missing; its parent must exist."""
 
+    def open_read(self, path: str) -> BinaryIO:
+        """The file at path to read in chunks; closing it ends the read."""
+
     def open_write(self, path: str) -> BinaryIO:
         """A writable binary file at path, its parent folders made; closing it finishes the write."""
 
@@ -104,6 +110,9 @@ class MountedStorage:
     def mkdir(self, path: str) -> None:
         self.local(path).mkdir(exist_ok=True)
 
+    def open_read(self, path: str) -> BinaryIO:
+        return self.local(path).open("rb")
+
     def open_write(self, path: str) -> BinaryIO:
         target = self.local(path)
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -127,6 +136,29 @@ class MountedStorage:
 
     def local_path(self, path: str) -> Optional[Path]:
         return self.local(path)
+
+
+class SshReader:
+    """A remote file streamed out of `cat` over ssh; close raises when the remote side failed."""
+
+    def __init__(self, base: list[str], path: str):
+        self.path = path
+        self.proc = subprocess.Popen([*base, f"cat {shlex.quote(path)}"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=FLAGS_NO_WINDOW)
+
+    def read(self, n: int) -> bytes:
+        return self.proc.stdout.read(n)
+
+    def close(self) -> None:
+        self.proc.stdout.close()
+        code = self.proc.wait()
+        if code != 0:
+            raise OSError(self.proc.stderr.read().decode(errors="replace").strip() or f"reading {self.path} failed")
+
+    def __enter__(self) -> "SshReader":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
 
 
 class SshWriter:
@@ -189,6 +221,9 @@ class SshStorage:
 
     def mkdir(self, path: str) -> None:
         self.run(f"test -d {shlex.quote(path)} || mkdir {shlex.quote(path)}")
+
+    def open_read(self, path: str) -> SshReader:
+        return SshReader(self.base, path)
 
     def open_write(self, path: str) -> SshWriter:
         return SshWriter(self.base, path)
@@ -282,6 +317,23 @@ def destination_state(storage: Storage, path: str) -> tuple[str, str]:
     return path, "new"
 
 
+def download(storage: Storage, path: str, local: Path, progress: dict) -> Path:
+    """
+    Copy path from storage to local through local.part, counting bytes into progress["done"]; storage is only read.
+    The .part file is replaced into local once whole, so a failed copy never leaves a short file at local.
+    """
+    local.parent.mkdir(parents=True, exist_ok=True)
+    part = local.with_name(local.name + ".part")
+    with storage.open_read(path) as src, part.open("wb") as dst:
+        while chunk := src.read(SIZE_CHUNK):
+            if progress.get("cancelled"):
+                raise InterruptedError(f"copy of {posixpath.basename(path)} cancelled; {part} is left partly written")
+            dst.write(chunk)
+            progress["done"] += len(chunk)
+    os.replace(part, local)
+    return local
+
+
 def write_text(storage: Storage, path: str, text: str) -> None:
     with storage.open_write(path) as f:
         f.write(text.encode())
@@ -321,6 +373,8 @@ class Transfer:
             target = f"{self.dest}/{source.name}"
             if not self.overwrite and self.storage.exists(target):
                 raise FileExistsError(f"{target} already exists; tick overwrite to replace it")
+            if not self.overwrite and self.metadata is not None and self.storage.exists(f"{target}{SIDECAR_SUFFIX}"):
+                raise FileExistsError(f"{target}{SIDECAR_SUFFIX} already exists; tick overwrite to replace it")
             if source.is_dir():
                 plan += [(p, f"{target}/{p.relative_to(source).as_posix()}") for p in sorted(source.rglob("*")) if p.is_file()]
             else:

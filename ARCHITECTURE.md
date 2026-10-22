@@ -9,6 +9,12 @@
 - `storage.py` — the `Storage` protocol, `MountedStorage`, `SshStorage` and `Transfer`.
 - `catalog.py` — `Catalog`, the SQLite index, and the rules (`classify_folder`, `classify_file`, `KINDS`) that name
   a dataset from its listing.
+- `slices.py` — `SliceDatabase`, the human slice table: `patients`, `slices` and `assays` in SQLite, joined on
+  `patient_id` and `slice_id` (renames cascade, parents with children cannot be deleted), and `files`, an index of
+  everything under `ROOT` from one `Storage.walk`. `COLUMNS` types every column the table page edits through. Rows
+  carry an `owner`; `can_edit` (owner or `ADMIN`) is checked in the database on every update and delete.
+  `match_files` finds a slice's files from its `file_match`, `file_dates` reading every date spelling the lab uses.
+  A file from another `VERSION_SCHEMA` is renamed aside, not dropped.
 - `viewers.py` — the command a dataset's kind opens with, and the detached launch.
 - `lab4.py` — `Recording`: the Lab4 Recording key, its details, a new subject's fields, and the sidecar dict.
 - `database.py` — `Credentials` (the website's credentials file), `Lab4Database` (sign-in, `schema`, `register`,
@@ -71,6 +77,15 @@ every row under its root; the totals of folders above the root go stale until th
 
 Every table is keyed by `(storage, path)` with `storage` the backend's label, so one file holds several backends.
 The schema is plain SQL to carry over to the lab's database server. Browse reads it through `Catalog.describe`.
+
+## Writes and the confirm dialog
+
+`Storage` never deletes, moves or renames; `open_write` and `mkdir` are its only writes, reached from `Transfer.run`
+and `write_text`. The window never calls those directly: `act()` and the slice page's Delete / Reset build
+`self.confirm` (title, lines, button, and the call to run), and `draw_body` shows it as one modal that runs the
+call only on its button. Copies down (`storage.download`) go through the same modal and write only under
+`cache/`, through a `.part` file. Export goes through the system save dialog. `tests/test_confirm.py` checks that
+each of these leaves the files alone until confirmed.
 
 ## Sidecars
 

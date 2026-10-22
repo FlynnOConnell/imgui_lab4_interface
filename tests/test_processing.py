@@ -171,6 +171,7 @@ def test_transfer_page_submits_the_units_chosen_once_sent(tmp_path, monkeypatch)
     commands = []
     monkeypatch.setattr(app, "run_remote", lambda command: commands.append(command) or "777")
     app.act()
+    app.confirm["run"](*app.confirm["args"])
     settle(app)
     assert not app.failed, app.message
     assert app.message == "submitted job(s) 777 on GPUA100"
@@ -187,6 +188,7 @@ def test_the_window_keeps_jobs_biohpc_refused_and_submits_them_later(tmp_path, m
 
     monkeypatch.setattr(app, "run_remote", refuse_ssh)
     app.act()
+    app.confirm["run"](*app.confirm["args"])
     settle(app)
     assert app.failed and app.message.startswith("1 job(s) wait to be submitted")
     assert (tmp_path / "mount" / "data2" / "M231" / "scan.mesc").is_file()
@@ -205,6 +207,7 @@ def test_a_failed_transfer_submits_nothing(tmp_path, monkeypatch):
     (tmp_path / "mount" / "data2" / "M231" / "scan.mesc").write_bytes(b"old")
     monkeypatch.setattr(app, "run_remote", lambda command: pytest.fail("submitted after a failed transfer"))
     app.act()
+    app.confirm["run"](*app.confirm["args"])
     settle(app)
     assert app.failed and "already exists" in app.message
     assert app.jobs == [] and app.pending == []
