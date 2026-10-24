@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+from test_transfer_page import settle
 
 from imgui_lab4_interface import Settings
 from imgui_lab4_interface.app import Lab4App
@@ -32,6 +33,8 @@ def test_transfer_asks_first(app, tmp_path):
     before = snapshot(tmp_path / "mount")
     app.page, app.sources, app.overwrite = "transfer", [str(tmp_path / "data.tif")], True
     app.act()
+    assert app.confirm is None and "sizes" in app.futures
+    settle(app)
     assert app.confirm["button"] == "Send" and "replaced" in " ".join(app.confirm["lines"])
     assert app.transfer is None and "transfer" not in app.futures
     assert snapshot(tmp_path / "mount") == before

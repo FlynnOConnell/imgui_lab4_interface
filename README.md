@@ -1,9 +1,8 @@
 # imgui_lab4_interface
 
-A desktop window for the PML group to move data onto BioHPC storage, attach Lab4 metadata to it, and register
-recordings in the Lab4 database. Built on
-[imgui-bundle](https://github.com/pthom/imgui_bundle) and
-[imgui_data_loader](https://github.com/FlynnOConnell/imgui_data_loader), laid out like the `masknmf` launcher.
+A desktop app for the PML lab: copy data to BioHPC, attach Lab4 metadata, and register recordings in the Lab4
+database. Built on [imgui-bundle](https://github.com/pthom/imgui_bundle) and
+[imgui_data_loader](https://github.com/FlynnOConnell/imgui_data_loader).
 
 ## Install
 
@@ -14,60 +13,50 @@ uv venv && uv pip install -e ".[dev]"
 lab4
 ```
 
+## Links
+
+- [Lab docs](https://doc.memorylongevity.org/)
+- [Lab4 docs](https://lab4.memorylongevity.org/)
+- [Lab4 workspace](http://server.memorylongevity.org): sign in with GitLab and download your credentials
+
 ## Use
 
-1. **Sign in.** The window signs in to the Lab4 database with the credentials file the Lab4 website hands out: sign
-   in there with GitLab, download your credentials, and save them as `~/.lab4/secrets.json` (or point
-   `LAB4_SECRETS_PATH` at them). **Work offline** skips Lab4; transfers and sidecars still work.
-2. **Settings.** On **Connection**, pick how this machine reaches BioHPC: a mounted share (a local folder and the BioHPC folder it
-   shows, e.g. `X:\` showing `/biohpc`) or ssh (an alias or `user@host` with keys already set up). Paths are always
-   BioHPC's own (`/biohpc/data2/...`), the ones Lab4 stores. With no mount root set, the window looks for a drive
-   or mount whose share is `/biohpc` (e.g. an SSHFS-Win `\\sshfs.kr\you@host!port\biohpc`) and uses it when there
-   is exactly one; **Detect** lists them. **Destinations** holds the folders Transfer offers, **Viewers** what
-   opens a dataset, and **Processing** where overnight jobs run: the ssh host they are submitted through (a BioHPC
-   login node), the GPU partition, the GPUs asked for, an email for SLURM to write to when each ends, and the folder
-   on BioHPC holding the pipeline (`~/repos/pml_utilities/hpc/asap7`; set it up with that folder's README). **Save**
-   writes them to `~/.imgui_lab4_interface/settings.json`.
-3. **Transfer.** Four steps on one page:
+1. **Sign in.** Download your credentials from the Lab4 workspace and save them as `~/.lab4/secrets.json` (or set
+   `LAB4_SECRETS_PATH`). **Work offline** skips Lab4; transfers and sidecars still work.
+2. **Settings.** **Save** writes them to `~/.imgui_lab4_interface/settings.json`.
+   - *Connection*: a mounted share (e.g. `X:\` showing `/biohpc`) or ssh (an alias or `user@host`, keys set up).
+     With no mount root set, a single `/biohpc` mount found on this machine is used; with none, ssh to
+     `lab-research`, the lab server alias pml_utilities uses. **Detect** lists mounts.
+   - *Destinations*: the folders Transfer offers.
+   - *Viewers*: the `mbo` and `masknmf` commands, on `PATH` or full paths.
+   - *Processing*: the ssh host jobs are submitted through (a BioHPC login node, `biohpc` by default), GPU
+     partition, GPUs, email, and the pipeline folder
+     (`~/repos/pml_utilities/hpc/asap7`; see its README).
+
+   Paths are always BioHPC paths (`/biohpc/data2/...`), as Lab4 stores them.
+3. **Transfer.**
    1. *Sources*: add files or folders.
-   2. *Destination*: type a BioHPC folder or **Browse...** for one. A folder that does not exist yet is made when its
-      parent exists (one new folder, never its parents); the line under the field says whether it exists, will be
-      made, or cannot be used.
-   3. *Metadata*: the recording's Lab4 key (experimenter, experiment group, subject, session start, device), its
-      label, weight and notes, and any extra key/value fields. Signed in, the choices come from Lab4's lookup tables,
-      and a subject new to Lab4 asks for the fields its Subject row needs.
+   2. *Destination*: type a BioHPC folder or **Browse...**. A missing folder is made when its parent exists.
+   3. *Metadata*: the Lab4 key (experimenter, experiment group, subject, session start, device), label, weight,
+      notes and extra fields. Signed in, the choices come from Lab4. A new subject asks for its Subject fields.
+   4. *Processing*: tick **Process .mesc units overnight** to run the ASAP7 spine pipeline (`mbo asap7`) on BioHPC.
+      Pick the units (movies with enough frames) and set the channel, first frame, MAD threshold and detrend window.
 
-   4. *Processing*: tick **Process .mesc units overnight** to run the ASAP7 spine pipeline (`mbo asap7` from
-      pml_utilities, the batch form of `asap7_spine_pipeline_detrend.ipynb`) on BioHPC. Each `.mesc` among the sources, or inside a
-      folder among them, lists its units read from its headers; movies (time series, chessboard and ribbon scans)
-      with a frame rate and enough frames are shown, volumes, z-stacks, line scans, snapshots and RTMC streams are
-      not. Tick the units to run and set the channel (from 1), first frame, MAD correlation threshold and detrend
-      window (the notebook's values by default).
+   **Send** copies each source with `<name>.lab4.json` beside it. With processing on, it then checks each `.mesc`
+   landed whole and submits one SLURM job per unit. Results go to `masknmf_asap7/<unit>_detrend_<time>/` beside the
+   `.mesc`. **Check** gets job states from `sacct`.
+4. **Browse storage.** List BioHPC folders and see which items have metadata. Select one to attach a sidecar.
+   **Scan** catalogs a folder and everything under it. Double-click a folder to enter it, or a dataset to open it.
+   Select an `.h5` (from `lab4.convert`) to **Register in Lab4**; new experiment groups, subjects and sessions are
+   added in the same transaction.
+5. **Human slices.** Track human slices, with demo rows seeded from Shobhana's files in `/biohpc/data4/Shobhana`.
+   A slice's `file_match` finds its files: every word must be in the path, a `YYYY-MM-DD` word matches any spelling
+   of that date (`7-27-2026`, `260727`, `May21st_2026`), and `-word` excludes. Filter the tables with words,
+   `column:value`, or `column=value` for an exact match. Double-click a file to open it; over
+   ssh it is first copied to `~/.imgui_lab4_interface/cache`, after asking. Rows belong to whoever added them;
+   `shobhana` is the admin. *acting as* picks the user.
 
-   Send copies each source under its own name with `<name>.lab4.json` beside it. With processing on, once the copy
-   finishes the window checks each `.mesc` is on BioHPC at its full size, then submits one SLURM job per unit over
-   ssh. Results land beside the `.mesc` in `masknmf_asap7/<unit>_detrend_<time>/`, holding the job's log
-   (`logs/slurm_<job>.out`) and masknmf's run folder, which Browse opens in `masknmf view`. The jobs submitted are
-   listed under step 4; **Check** asks `sacct` for their state.
-4. **Browse storage.** List BioHPC folders, see which items already carry metadata, and attach a sidecar to data
-   that is already there, using the same metadata form, folded below the list. **Scan** catalogs the folder and
-   everything under it: each dataset's kind, what every folder holds, and the sidecars. Double-click a folder to enter it and a dataset file to open it in mbo or
-   masknmf; a dataset folder opens from **Open in** below the list. Selecting an `.h5` (what `lab4.convert` writes)
-   offers **Register in Lab4**, which adds it as the recording's data, with its experiment group, subject and
-   session when they are new, in one transaction.
-5. **Human slices.** The human slice prep table, seeded from Shobhana's file names on BioHPC
-   (`/biohpc/data4/Shobhana`): four collection dates and their slices; patient ids are placeholders until the
-   PowerPoints. Slices sort by collection date, region, patient and day post-slicing,
-   and hold electroporation (material, construct, dye), ephys, incubator and outcome; failed slices stay, with why.
-   Each slice's `file_match` finds its files in an index of that folder: every word must be in the path, a
-   `YYYY-MM-DD` word matches the date however the name spells it (`7-27-2026`, `260727`, `May21st_2026`), and
-   `-word` keeps files out. Pick a slice to see its files; a patient shows every file of its date and flags those no
-   slice claims. Double-click a file to open it: in place when the share is mounted, else from a copy in
-   `~/.imgui_lab4_interface/cache`, made after asking. Rows belong to whoever added them; `shobhana` is admin, and
-   *acting as* picks the user.
-
-Opening needs the share mounted (ssh storage only lists) and the viewers set in Settings, either names on
-`PATH` or full paths, e.g. `~/envs/pengui/.venv/Scripts/mbo.exe`.
+Opening a dataset needs the share mounted (ssh can only list) and the viewers set in Settings.
 
 | kind | opens with |
 |------|------------|
@@ -77,24 +66,23 @@ Opening needs the share mounted (ssh storage only lists) and the viewers set in 
 
 ## Files on disk
 
-Everything lives under `~/.imgui_lab4_interface/` (override with `IMGUI_LAB4_HOME`):
+Under `~/.imgui_lab4_interface/` (or `IMGUI_LAB4_HOME`):
 
 | file | holds |
 |------|-------|
-| `settings.json` | backend, mount root, ssh host, destinations |
-| `recent.json` | recently added sources, shown in the rail |
+| `settings.json` | settings |
+| `recent.json` | recent sources, shown in the rail |
 | `window.ini` | window layout |
 | `catalog.sqlite` | the catalog: `datasets`, `folders`, `metadata`, `scans` |
-| `slices.sqlite` | the human slice table: `patients`, `slices`, `assays`, and the `files` index |
-| `cache/` | files copied down from BioHPC to open, at their BioHPC paths |
-| `logs/` | output of each viewer opened |
-| `jobs.json` | every processing job submitted: job id, unit, `.mesc`, run folder, settings |
+| `slices.sqlite` | the slice tables: `patients`, `slices`, `assays`, and the `files` index |
+| `cache/` | files copied from BioHPC to open |
+| `logs/` | viewer output |
+| `jobs.json` | submitted processing jobs |
 
 ## Development database
 
-Never develop against the Lab4 server. `scripts/dev_db.py` runs a throwaway Lab4 database on `127.0.0.1:55433`:
-PostgreSQL 16 from conda-forge through [pixi](https://pixi.sh), built from a Lab4 checkout's development fixtures and
-migrations (`~/repos/lab4`, or `--lab4`), with one lab user provisioned the way the website provisions one.
+Never develop against the Lab4 server. `scripts/dev_db.py` runs a local Lab4 database on `127.0.0.1:55433`
+(PostgreSQL 16 through [pixi](https://pixi.sh)), built from a Lab4 checkout (`~/repos/lab4`, or `--lab4`).
 
 ```bash
 .venv/Scripts/python scripts/dev_db.py up      # create on first run, then start; down stops, reset rebuilds
@@ -107,24 +95,21 @@ LAB4_SECRETS_PATH=.dev/secrets.json lab4
 .venv/Scripts/python -m pytest
 ```
 
-Every test runs with `LAB4_SECRETS_PATH` pointed at a missing file. `tests/test_database.py` uses only the
-development database and skips when it is not running.
+Tests point `LAB4_SECRETS_PATH` at a missing file. `tests/test_database.py` needs the development database and
+skips without it.
 
 ## What changes files
 
-Nothing deletes, moves or renames anything on BioHPC or in your data; Transfer makes at most one new folder. Every
-action that writes a data file, or deletes rows, shows a dialog saying exactly what it writes or removes, and does
-nothing until its button is pressed:
+Nothing is deleted, moved or renamed on BioHPC. Every action that writes data or deletes rows asks first:
 
 | action | writes | asks with |
 |--------|--------|-----------|
-| Transfer: Send | the sources and their sidecars at the destination, then the processing jobs ticked; with overwrite ticked, replaces what is there | Send to BioHPC? |
-| Browse: Attach metadata | `<name>.lab4.json`, saying when it replaces one | Attach metadata? |
-| Human slices: open a file over ssh | a copy in `cache/`; BioHPC is only read | Copy to this machine? |
-| Human slices: Export | the csv where you choose | the system save dialog, which asks before replacing |
-| Human slices: Delete, Reset rows | rows in `slices.sqlite` only | Delete rows?, Reset the rows? |
+| Transfer: Send | the sources and sidecars, then any processing jobs; with overwrite on, replaces what is there | Send to BioHPC? |
+| Browse: Attach metadata | `<name>.lab4.json` | Attach metadata? |
+| Human slices: open a file over ssh | a copy in `cache/` | Copy to this machine? |
+| Human slices: Export | a csv | the system save dialog |
+| Human slices: Delete, Reset rows | rows in `slices.sqlite` | Delete rows?, Reset rows? |
 
-Editing a cell writes that one value to `slices.sqlite` as you press Enter. The window's own files (`settings.json`
-on Save, `recent.json`, `window.ini`, `catalog.sqlite` on Scan, `logs/`, `jobs.json`) are written without asking. A
-`slices.sqlite` from an older version is kept whole as `slices.v<N>.sqlite`, never dropped. Files opened in place
-on a mounted share are handed to mbo or their default app; what that app does with them is up to it.
+Editing a cell saves it on Enter. The app's own files (`settings.json`, `recent.json`, `window.ini`,
+`catalog.sqlite`, `logs/`, `jobs.json`) are written without asking. A `slices.sqlite` from an older version is kept
+as `slices.v<N>.sqlite`.

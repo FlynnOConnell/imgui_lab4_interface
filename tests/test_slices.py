@@ -165,7 +165,47 @@ def test_reset_and_export(tmp_path):
     db.delete("slices", [s["id"] for s in seeded[:5]], ADMIN)
     db.reset()
     assert [s["slice_id"] for s in db.rows("slices")] == [s["slice_id"] for s in seeded]
+    db.update("slices", seeded[0]["id"], "notes", "ΔF/F in μm", ADMIN)
     db.export("slices", tmp_path / "slices.csv")
-    with open(tmp_path / "slices.csv", newline="") as f:
+    with open(tmp_path / "slices.csv", newline="", encoding="utf-8-sig") as f:
         rows = list(csv.DictReader(f))
     assert len(rows) == len(seeded) and list(rows[0]) == [name for name, _, _ in COLUMNS["slices"]]
+    assert rows[0]["notes"] == "ΔF/F in μm"
+
+
+def test_add_needs_a_parent(tmp_path):
+    db = SliceDatabase(tmp_path / "s.sqlite")
+    db.delete("slices", [s["id"] for s in db.rows("slices")], ADMIN)
+    with pytest.raises(ValueError, match="add a slice first"):
+        db.add("assays", ADMIN)
+    db.delete("patients", [p["id"] for p in db.rows("patients")], ADMIN)
+    with pytest.raises(ValueError, match="add a patient first"):
+        db.add("slices", ADMIN)
+
+
+def test_a_new_slice_id_skips_ids_moved_to_other_patients(tmp_path):
+    db = SliceDatabase(tmp_path / "s.sqlite")
+    moved = db.add("slices", ADMIN, "HS260914")
+    db.update("slices", moved, "patient_id", "HS260918", ADMIN)
+    added = db.add("slices", ADMIN, "HS260914")
+    ids = {s["id"]: s["slice_id"] for s in db.rows("slices")}
+    assert (ids[moved], ids[added]) == ("HS260914.S04", "HS260914.S05")
+
+
+def test_a_choice_can_be_cleared(tmp_path):
+    db = SliceDatabase(tmp_path / "s.sqlite")
+    first = db.rows("slices")[0]
+    db.update("slices", first["id"], "region", "hippocampus", ADMIN)
+    db.update("slices", first["id"], "region", "", ADMIN)
+    assert db.rows("slices")[0]["region"] is None
+
+
+def test_an_unreachable_index_keeps_the_last_one(tmp_path):
+    (tmp_path / ROOT.lstrip("/")).mkdir(parents=True)
+    (tmp_path / ROOT.lstrip("/") / "a.mesc").write_bytes(b"mesc")
+    db = SliceDatabase(tmp_path / "s.sqlite")
+    kept = db.index_files(MountedStorage(str(tmp_path)))
+    for storage in (MountedStorage(""), MountedStorage(str(tmp_path / "gone"))):
+        with pytest.raises(OSError):
+            db.index_files(storage)
+    assert db.files() == kept

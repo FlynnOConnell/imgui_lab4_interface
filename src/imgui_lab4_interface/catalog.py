@@ -1,10 +1,7 @@
 """
-A catalog of what lives on BioHPC storage: every dataset mbo_utilities or masknmf can open, what each folder holds
-beneath it, and the Lab4 sidecars beside the data, kept in SQLite so the window queries it instead of walking again.
+A SQLite catalog of BioHPC storage: datasets mbo or masknmf can open, folder totals, and Lab4 sidecars.
 
-A scan reads the listing (names, sizes, times) and the small sidecars only, so it costs the same over a mounted
-share as over one ssh `find`. The tables are plain SQL and keyed by storage, ready to move to the lab's database
-server when one file is no longer enough.
+A scan reads only the listing and the sidecars, so it costs about the same over a mount or ssh.
 """
 
 import json
@@ -26,14 +23,14 @@ SUFFIX_TRACKING = "_roicat-tracking-manifest.json"
 NAME_VOLTAGE = "denoised_trace_scans.pkl"
 EVERY_RECORDS = 2000
 
-# a dataset kind: the viewer that opens it, the arguments before its path, and what it is
+# kind: (viewer, args before the path, description)
 KINDS = {
     "masknmf-run": ("masknmf", ["view"], "masknmf run folder: config.json and its results"),
-    "masknmf-results": ("masknmf", ["view"], "masknmf results file, at whatever stage it reached"),
+    "masknmf-results": ("masknmf", ["view"], "masknmf results file"),
     "roicat-tracking": ("masknmf", ["view"], "ROICaT tracking run across sessions"),
     "suite2p-run": ("mbo", [], "suite2p output holding plane folders"),
     "suite2p-plane": ("mbo", [], "suite2p plane folder (ops.npy)"),
-    "voltage-pf": ("mbo", ["curate"], "vnoiser voltage results (PF folder), opened in the curation window"),
+    "voltage-pf": ("mbo", ["curate"], "vnoiser voltage results (PF folder)"),
     "mesc": ("mbo", [], "Femtonics .mesc recording"),
     "zarr": ("mbo", [], "zarr array"),
     "tiff-series": ("mbo", [], "folder of tiff files"),
@@ -99,12 +96,7 @@ def classify_file(name: str) -> Optional[str]:
 
 
 class Catalog:
-    """
-    The SQLite index of scanned storage.
-
-    Args:
-        path (Path | None): The database file; catalog.sqlite in the data folder when None
-    """
+    """The SQLite catalog; catalog.sqlite in the data folder by default."""
 
     def __init__(self, path: Optional[Path] = None):
         self.path = Path(path or data_dir() / "catalog.sqlite").absolute()
@@ -118,14 +110,9 @@ class Catalog:
 
     def scan(self, storage: Storage, root: str, progress: Optional[Callable[[int], None]] = None) -> dict:
         """
-        Walk root, classify every folder and file, read the sidecars, and replace what the catalog held under root.
+        Walk root, classify everything, read sidecars, and replace the catalog rows under root.
 
-        Args:
-            storage (Storage): Where root is
-            root (str): The BioHPC folder to scan
-            progress (Callable | None): Called with the number of items listed so far, every EVERY_RECORDS
-        Returns:
-            dict: root, records listed, datasets found, seconds taken
+        progress gets the item count every EVERY_RECORDS items. Returns root, records, datasets and seconds.
         """
         started = time.perf_counter()
         root = root.rstrip("/") or "/"
@@ -198,12 +185,7 @@ class Catalog:
         return {"root": root, "records": n_records, "datasets": len(datasets), "seconds": seconds}
 
     def describe(self, storage_label: str, folder: str) -> dict:
-        """
-        What the catalog knows of a folder: its summary, the latest scan covering it, and each item directly in it.
-
-        Returns:
-            dict: "folder" (row or None), "scan" (row or None), "items" (name -> merged folder summary and dataset row)
-        """
+        """The folder's summary, the latest scan covering it, and its items by name."""
         folder = folder.rstrip("/") or "/"
         with closing(self.connect()) as db:
             summary = db.execute("SELECT * FROM folders WHERE storage = ? AND path = ?", (storage_label, folder)).fetchone()

@@ -1,4 +1,4 @@
-"""Open a catalogued dataset in the viewer its kind calls for, as its own process writing to a log."""
+"""Launch dataset viewers as detached processes that log to a file."""
 
 import shutil
 import subprocess
@@ -20,10 +20,10 @@ def command(settings: Settings, kind: str, local: Path) -> list[str]:
 
 
 def launch(argv: list[str]) -> Path:
-    """Start argv detached from this window; returns the log its output goes to."""
+    """Start argv detached; returns its log file."""
     executable = shutil.which(argv[0])
     if executable is None:
-        raise FileNotFoundError(f"{argv[0]} is not on PATH; set the viewer's path on the Storage page")
+        raise FileNotFoundError(f"{argv[0]} not found; set its path in Settings > Viewers")
     logs = data_dir() / "logs"
     logs.mkdir(exist_ok=True)
     log = logs / f"{datetime.now():%Y%m%dT%H%M%S}_{Path(argv[0]).stem}.log"

@@ -1,14 +1,9 @@
 """
-The human slice prep table: the patients tissue is collected from, every slice cut from them and what was done to it
-(electroporation, ephys, the incubator), and the assays others add beside it, in SQLite beside the catalog.
+The human slice table: patients, slices and assays in SQLite.
 
-The data stays where Shobhana keeps it on BioHPC, grouped by kind (Images, Ephys) and named by date, slice and day
-(HSLice_B_7-27-2026.mesc, HSlice_9-14-2026-Day2_Storage_mrnaEGFP.mesc). A slice finds its files by a match pattern
-over an index of that folder, so nothing is moved or renamed to fit the table. The seed rows are read off those names;
-what the names do not say (patient ids, region, ephys) waits for the PowerPoints.
-
-Every row belongs to whoever added it. Only its owner or the admin edits or deletes it, and anyone adds rows of their
-own, so Dana's live-dead assays sit beside Shobhana's slices without touching them. Failed slices stay, with why.
+Data stays where Shobhana keeps it on BioHPC. Each slice finds its files with a match pattern over an index of that
+folder, so nothing is moved or renamed. Rows belong to whoever added them; only the owner or the admin edits them.
+Failed slices stay, with why.
 """
 
 import csv
@@ -23,11 +18,11 @@ from typing import Optional
 from imgui_lab4_interface.config import data_dir
 from imgui_lab4_interface.storage import Storage
 
-# bumped when the tables change; an older file is dropped and seeded again
+# bump when the tables change; an older file is renamed aside and the tables reseeded
 VERSION_SCHEMA = 3
 ADMIN = "shobhana"
 PEOPLE = ["shobhana", "dana", "adrian", "flynn"]
-# where the slice data lives on BioHPC until the shared humansliceprep folder exists
+# slice data on BioHPC, until the shared humansliceprep folder exists
 ROOT = "/biohpc/data4/Shobhana"
 
 SEXES = ["F", "M", "U"]
@@ -42,8 +37,8 @@ INCUBATOR = ["storage solution", "chamber, bubbling", "culture", "out, recorded"
 OUTCOMES = ["ok", "failed"]
 ASSAYS = ["live-dead", "2P imaging", "histology", "IHC"]
 
-# a table's columns: name, type, and the choices of a choice column or the table a ref column points into; ids name
-# the row, refs hold another table's id, joined columns come from the referenced row and owner from who added it
+# columns: (name, type, choices or the table a ref points to); joined columns come from the patient, owner is who
+# added the row
 COLUMNS = {
     "slices": (
         ("collection_date", "joined", None),
@@ -112,7 +107,7 @@ CREATE TABLE IF NOT EXISTS files (path TEXT PRIMARY KEY, size INTEGER, mtime REA
 CREATE TABLE IF NOT EXISTS indexed (root TEXT PRIMARY KEY, indexed_at TEXT, storage TEXT);
 """
 
-# patients and slices read off Shobhana's file names; patient ids are placeholders until the PowerPoints give the real ones
+# seed rows from Shobhana's file names; patient ids are placeholders
 NOTE_PATIENT = "placeholder id from the file names; the real one is in the PowerPoints"
 SOURCE = "file names on BioHPC"
 SEED_PATIENTS = [
@@ -153,13 +148,13 @@ ISO = re.compile(r"\d{4}-\d\d-\d\d")
 
 
 def can_edit(owner: str, user: str) -> bool:
-    """Whether user may change a row owner added: their own rows, or every row for the admin."""
+    """Users edit their own rows; the admin edits every row."""
     return user == ADMIN or user == owner
 
 
 def locked(owner: str) -> str:
-    """Who may change a row owner added, said for someone who may not."""
-    return f"only {ADMIN} changes it" if owner == ADMIN else f"only {owner} or {ADMIN} change it"
+    """Who can edit a row owner added."""
+    return f"only {ADMIN} can edit it" if owner == ADMIN else f"only {owner} or {ADMIN} can edit it"
 
 
 def file_dates(path: str) -> set[str]:
@@ -178,10 +173,7 @@ def file_dates(path: str) -> set[str]:
 
 
 def match_files(files: list[dict], pattern: str) -> list[dict]:
-    """
-    The files whose path holds every word of pattern, ignoring case: a YYYY-MM-DD word matches the date however the
-    path spells it, and a word starting with - keeps out the files holding the rest of it.
-    """
+    """Files whose path has every word of pattern, any case; a YYYY-MM-DD word matches any spelling, -word excludes."""
     words = pattern.lower().split()
     found = []
     for f in files:
@@ -201,16 +193,13 @@ def match_files(files: list[dict], pattern: str) -> list[dict]:
 
 class SliceDatabase:
     """
-    The patients, slices and assays tables, read whole and written one cell or row at a time as a named user, and
-    the index of the files under ROOT the slices match against.
-
-    Args:
-        path (Path | None): The database file; slices.sqlite in the data folder when None
+    The patients, slices and assays tables, edited as a named user, and the file index under ROOT. Stored in
+    slices.sqlite in the data folder by default.
     """
 
     def __init__(self, path: Optional[Path] = None):
         self.path = Path(path or data_dir() / "slices.sqlite").absolute()
-        # a file from an older schema is kept whole beside the new one, never dropped
+        # an older-schema file, renamed aside rather than dropped
         self.moved_aside: Optional[Path] = None
         if self.path.exists():
             with closing(sqlite3.connect(self.path)) as db:
@@ -251,7 +240,7 @@ class SliceDatabase:
             )
 
     def reset(self) -> None:
-        """Throw away every row and seed the ones read off the file names again; the file index stays."""
+        """Delete every row and reseed from the file names; the file index stays."""
         with closing(self.connect()) as db, db:
             for table in ("assays", "slices", "patients"):
                 db.execute(f"DELETE FROM {table}")
@@ -266,14 +255,14 @@ class SliceDatabase:
             return [dict(row) for row in db.execute(query)]
 
     def files(self) -> tuple[list[dict], Optional[dict]]:
-        """The last index of ROOT: every file's path under it, size and mtime, and when and over what it was taken."""
+        """The saved file index under ROOT, and when it was taken."""
         with closing(self.connect()) as db:
             files = [dict(row) for row in db.execute("SELECT * FROM files ORDER BY path")]
             indexed = db.execute("SELECT * FROM indexed WHERE root = ?", (ROOT,)).fetchone()
         return files, None if indexed is None else dict(indexed)
 
     def index_files(self, storage: Storage) -> tuple[list[dict], Optional[dict]]:
-        """List every file under ROOT in one walk, read nothing, and keep the listing for when storage is out of reach."""
+        """Index every file under ROOT in one walk and save it for when storage is offline."""
         files = [
             {"path": posixpath.relpath(r.path, ROOT), "size": r.size, "mtime": r.mtime}
             for r in storage.walk(ROOT)
@@ -293,8 +282,9 @@ class SliceDatabase:
             while f"H{date.today():%y}.{n:03d}" in taken:
                 n += 1
             return f"H{date.today():%y}.{n:03d}"
-        taken = {row[0] for row in db.execute("SELECT slice_id FROM slices WHERE patient_id = ?", (patient_id,))}
-        n = len(taken) + 1
+        # slice ids are unique across patients, since a slice can move to another patient
+        taken = {row[0] for row in db.execute("SELECT slice_id FROM slices")}
+        n = db.execute("SELECT count(*) FROM slices WHERE patient_id = ?", (patient_id,)).fetchone()[0] + 1
         while f"{patient_id}.S{n:02d}" in taken:
             n += 1
         return f"{patient_id}.S{n:02d}"
@@ -304,21 +294,20 @@ class SliceDatabase:
         for row in db.execute(f"SELECT * FROM {table} WHERE id IN ({', '.join('?' * len(ids))})", ids):
             if not can_edit(row["owner"], user):
                 name = row["patient_id" if table == "patients" else "slice_id"]
-                raise ValueError(f"{name} is {row['owner']}'s and locked to {user}; {locked(row['owner'])}")
+                raise ValueError(f"{name} is {row['owner']}'s; {locked(row['owner'])}")
 
     def add(self, table: str, user: str, parent: str = "") -> int:
         """
-        A new row of user's with a fresh id and defaults: a slice under the patient parent, an assay on the slice
-        parent, or the newest of either when parent is empty.
-
-        Returns:
-            int: The new row's id
+        Add a row for user with a new id and defaults; returns its id. parent is the new slice's patient or the new
+        assay's slice, the newest when empty. Raises ValueError when there is none.
         """
         with closing(self.connect()) as db, db:
             if table == "patients":
                 values = {"patient_id": self.next_id(db, table, ""), "collection_date": date.today().isoformat(), "sex": "U"}
             elif table == "slices":
                 found = db.execute("SELECT patient_id, collection_date FROM patients WHERE patient_id = ? OR ? = '' ORDER BY id DESC LIMIT 1", (parent, parent)).fetchone()
+                if found is None:
+                    raise ValueError("add a patient first")
                 values = {
                     "slice_id": self.next_id(db, table, found["patient_id"]), "patient_id": found["patient_id"], "day": 1,
                     "ep_material": "none", "ep_dye": "none", "ephys": "none", "incubator": "storage solution", "outcome": "ok",
@@ -326,13 +315,15 @@ class SliceDatabase:
                 }
             else:
                 found = db.execute("SELECT slice_id FROM slices WHERE slice_id = ? OR ? = '' ORDER BY id DESC LIMIT 1", (parent, parent)).fetchone()
+                if found is None:
+                    raise ValueError("add a slice first")
                 values = {"slice_id": found["slice_id"], "assay": "live-dead", "assay_date": date.today().isoformat()}
             values["owner"] = user
             names = ", ".join(values)
             return db.execute(f"INSERT INTO {table} ({names}) VALUES ({', '.join('?' * len(values))})", tuple(values.values())).lastrowid
 
     def duplicate(self, table: str, ids: list[int], user: str) -> list[int]:
-        """Copies of rows, user's own, under fresh ids; a copied slice stays with its patient. Returns their ids."""
+        """Copy rows as user's, with new ids; returns them."""
         made = []
         with closing(self.connect()) as db, db:
             for id_ in ids:
@@ -348,7 +339,7 @@ class SliceDatabase:
         return made
 
     def delete(self, table: str, ids: list[int], user: str) -> None:
-        """Delete rows; raises ValueError, deleting nothing, for a row not user's or one others still point at."""
+        """Delete rows; raises ValueError, deleting nothing, when a row is not user's or still has children."""
         try:
             with closing(self.connect()) as db, db:
                 self.check_owner(db, table, ids, user)
@@ -358,20 +349,14 @@ class SliceDatabase:
             raise ValueError(f"these still have {below}; delete or move them first") from None
 
     def update(self, table: str, id_: int, column: str, text: str, user: str) -> None:
-        """
-        Set one cell from what was typed, parsed by its column's type, as user.
-
-        Raises:
-            ValueError: The row is not user's, the column is read-only, the text does not parse, the id is taken, or
-                the row it points at does not exist
-        """
+        """Set one cell from typed text, as user; raises ValueError when the text or the edit is not allowed."""
         kind, choices = next((k, c) for name, k, c in COLUMNS[table] if name == column)
         text = text.strip()
         value: object = text
         if kind == "joined":
             raise ValueError(f"{column} comes from the patient; edit it on Patients")
         if kind == "owner":
-            raise ValueError("owner is who added the row and does not change")
+            raise ValueError("owner cannot be changed")
         if kind == "id" and not text:
             raise ValueError(f"{column} cannot be empty")
         if kind in ("int", "day"):
@@ -385,8 +370,10 @@ class SliceDatabase:
                 date.fromisoformat(text)
             except ValueError:
                 raise ValueError(f"{column} must be YYYY-MM-DD, not {text!r}") from None
-        elif kind == "choice" and text not in choices:
-            raise ValueError(f"{column} must be one of {', '.join(choices)}")
+        elif kind == "choice":
+            if text and text not in choices:
+                raise ValueError(f"{column} must be one of {', '.join(choices)}")
+            value = text or None
         try:
             with closing(self.connect()) as db, db:
                 self.check_owner(db, table, [id_], user)
@@ -395,9 +382,10 @@ class SliceDatabase:
             raise ValueError(f"no {choices[:-1]} {text}" if kind == "ref" else f"{column} {text} is already taken") from None
 
     def export(self, table: str, path: Path) -> None:
-        """Write the table to csv at path, the hidden id left out; the caller has asked before replacing a file."""
+        """Write the table to csv, without the id column."""
         names = [name for name, _, _ in COLUMNS[table]]
-        with open(path, "w", newline="") as f:
+        # utf-8 with a BOM so Excel reads it as utf-8
+        with open(path, "w", newline="", encoding="utf-8-sig") as f:
             writer = csv.DictWriter(f, names, extrasaction="ignore")
             writer.writeheader()
             writer.writerows(self.rows(table))

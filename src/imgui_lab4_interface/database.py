@@ -1,10 +1,8 @@
 """
-The Lab4 database: the credentials file the Lab4 website hands out, what the tables look like right now, and
-registering a recording.
+The Lab4 database: credentials, the current table layout, and registering recordings.
 
-It talks plain SQL and reads the tables' columns and keys from the database instead of assuming them, as the
-website does, so a column added on the server shows up here without a release. Every call opens its own
-connection, so calls are safe from any worker thread.
+Plain SQL, with columns and keys read from the database, so a new server column shows up without a release. Each
+call opens its own connection, so any worker thread can use it.
 """
 
 import dataclasses
@@ -30,7 +28,7 @@ FROM information_schema.columns
 WHERE table_schema = %s AND table_name = ANY(%s)
 ORDER BY table_name, ordinal_position
 """
-# pg_constraint rather than information_schema: the latter hides keys on tables the user does not own
+# pg_constraint, since information_schema hides keys on tables the user does not own
 QUERY_KEYS = """
 SELECT c.contype, t.relname, a.attname, rt.relname
 FROM pg_constraint c
@@ -52,11 +50,11 @@ def secrets_path() -> Path:
 @dataclasses.dataclass
 class Credentials:
     """
-    One lab member's database login, from the file the Lab4 website hands out.
+    A lab member's database login, from the Lab4 website's credentials file.
 
     Attributes:
-        database (str): The postgres database; the website's files leave it out, meaning "postgres"
-        schema (str): The schema the Lab4 tables live in, the file's DB_NAME
+        database (str): The postgres database; "postgres" when the file leaves it out
+        schema (str): The Lab4 schema, the file's DB_NAME
     """
 
     host: str
@@ -98,11 +96,11 @@ class Column:
 @dataclasses.dataclass
 class Schema:
     """
-    The Lab4 tables as the database has them now, and the values the Metadata page offers.
+    The Lab4 tables as they are now, and the choices the metadata form offers.
 
     Attributes:
-        tables (dict): table name -> its columns, for the tables a registration writes
-        choices (dict): column name -> the values its lookup table holds; a column with choices takes only those
+        tables (dict): table -> columns, for the tables register writes
+        choices (dict): column -> allowed values from its lookup table
         groups (list): (experimenter, collection_name) of every experiment group
         subjects (list): Every subject_id
     """
@@ -117,14 +115,14 @@ class Schema:
         return {c.name: c for c in self.tables.get(table, [])}
 
     def subject_fields(self) -> list[Column]:
-        """What a new subject is described by besides its id."""
+        """Subject columns other than the key."""
         return [c for c in self.tables.get("subject", []) if not c.key]
 
     def groups_of(self, experimenter: str) -> list[str]:
         return sorted(name for who, name in self.groups if who == experimenter)
 
     def problems(self, rec: Recording) -> list[str]:
-        """What the database would refuse in rec, beyond rec's own problems."""
+        """What the database would reject in rec."""
         found = []
         for column, value in (("experimenter", rec.experimenter), ("device_name", rec.device_name)):
             if column in self.choices and value.strip() and value.strip() not in self.choices[column]:
@@ -140,14 +138,14 @@ class Schema:
 
 
 def canonical(path: str) -> str:
-    """The path Lab4 stores for a BioHPC path; raises ValueError for one outside /biohpc."""
+    """path, when under /biohpc; raises ValueError otherwise."""
     if not path.startswith(f"{BIOHPC}/"):
         raise ValueError(f"{path} is not under {BIOHPC}")
     return path
 
 
 class Lab4Database:
-    """The Lab4 tables reached with one lab member's credentials."""
+    """Lab4 access with one lab member's credentials."""
 
     def __init__(self, credentials: Credentials):
         self.credentials = credentials
@@ -168,7 +166,7 @@ class Lab4Database:
         return sql.Identifier(self.credentials.schema, name)
 
     def schema(self) -> Schema:
-        """Sign in and read the tables, their lookups, and the groups and subjects already there."""
+        """Sign in and read the tables, lookups, groups and subjects."""
         name = self.credentials.schema
         with self.connect() as conn:
             user = conn.execute("SELECT current_user").fetchone()[0]
@@ -190,10 +188,10 @@ class Lab4Database:
         return Schema(user=user, tables=tables, choices=choices, groups=[tuple(g) for g in groups], subjects=subjects)
 
     def insert(self, conn: psycopg.Connection, table: str, values: dict, columns: dict, ignore_existing: bool) -> bool:
-        """Insert the values table has a column for; whether a row was added."""
+        """Insert the values table has columns for; returns whether a row was added."""
         values = {k: v for k, v in values.items() if k in columns}
         if ignore_existing:
-            # NOT NULL is checked before ON CONFLICT, so an existing row given only its key would still fail
+            # NOT NULL fires before ON CONFLICT, so look for the key first
             key = {k: v for k, v in values.items() if columns[k].key}
             where = sql.SQL(" AND ").join(sql.SQL("{} = %s").format(sql.Identifier(k)) for k in key)
             if conn.execute(sql.SQL("SELECT 1 FROM {} WHERE {}").format(self.table(table), where), list(key.values())).fetchone():
@@ -208,8 +206,8 @@ class Lab4Database:
 
     def register(self, schema: Schema, rec: Recording, data_path: str) -> dict:
         """
-        Add rec's Recording row pointing at data_path, and its group, subject and session when they are new, in one
-        transaction. Returns which rows were added; raises ValueError when the recording is already registered.
+        Add rec's Recording row for data_path, plus its group, subject and session when new, in one transaction.
+        Returns which rows were added; raises ValueError when already registered.
         """
         key = rec.key()
         session_key = {k: key[k] for k in ("experimenter", "collection_name", "subject_id", "session_datetime")}

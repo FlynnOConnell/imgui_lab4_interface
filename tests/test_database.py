@@ -188,7 +188,7 @@ def test_window_signs_in_and_registers(lab_credentials, tag, tmp_path, monkeypat
 
     app.recording = recording(tag, subject_fields={"species": "Mus musculus"})
     path = "/biohpc/data2/rec.h5"
-    assert app.register_problems("/biohpc/data2/rec.tif") == ["a recording's data is the .h5 lab4.convert writes"]
+    assert app.register_problems("/biohpc/data2/rec.tif") == ["only .h5 files (from lab4.convert) can be registered"]
     assert app.register_problems(path) == []
     app.register(path)
     settle(app)

@@ -1,7 +1,4 @@
-"""
-Overnight processing: the units of a Femtonics .mesc file to choose from, and the SLURM job that runs `mbo asap7`
-(pml_utilities, through hpc/asap7/run_asap7.sh) on one of them once a transfer has landed the file on BioHPC.
-"""
+"""Overnight processing: list a .mesc's units and submit one SLURM job per unit running `mbo asap7` on BioHPC."""
 
 import dataclasses
 import json
@@ -19,7 +16,7 @@ from imgui_lab4_interface.storage import Storage
 
 SUFFIX_MESC = ".mesc"
 ROLE_MEASUREMENT = "measurement"
-# MEScan MethodTypes recorded as one movie: unset, time series, chessboard, transverse and longitudinal ribbons
+# MEScan MethodTypes that are movies: unset, time series, chessboard, ribbons
 METHODS_MOVIE = (0, 1, 8, 9, 10)
 NAME_RESULTS = "masknmf_asap7"
 FIELDS_SACCT = "JobID,State,Elapsed,ExitCode"
@@ -31,11 +28,10 @@ class MescUnit(NamedTuple):
 
     Attributes:
         key (str): The full key the pipeline takes, e.g. MSession_0/MUnit_14
-        role (str): MEScan's role: "measurement" for a scan the operator ran, "background" or "motionCorrection"
-            for the snapshot and RTMC stream saved beside one
-        frames (int): Frames in the unit's first channel
-        fs (float | None): Frames per second, None when the unit declares no frame time
-        comment (str): What the operator typed for the unit
+        role (str): "measurement" for a scan; "background" or "motionCorrection" for snapshots and RTMC streams
+        frames (int): Frames in the first channel
+        fs (float | None): Frame rate, None when unknown
+        comment (str): The operator's comment
         method (int): MEScan's MethodType, e.g. 1 time series, 2 z-stack, 8 chessboard, 10 ribbon, 11 multicube
     """
 
@@ -53,7 +49,7 @@ class MescUnit(NamedTuple):
 
 @dataclasses.dataclass
 class Asap7Params:
-    """The settings `mbo asap7` takes besides the file and unit; defaults are the detrend notebook's. channel is 1-based."""
+    """`mbo asap7` settings; defaults match the detrend notebook. channel is 1-based."""
 
     channel: int = 1
     first_frame: int = 200
@@ -63,18 +59,18 @@ class Asap7Params:
     def problems(self) -> list[str]:
         found = []
         if self.channel < 1:
-            found.append("channels count from 1")
+            found.append("channel starts at 1")
         if self.first_frame < 0:
-            found.append("the first frame is 0 or more")
+            found.append("first frame must be 0 or more")
         if not 0 < self.mad_correlation_threshold <= 1:
-            found.append("the MAD correlation threshold is between 0 and 1")
+            found.append("MAD threshold must be between 0 and 1")
         if self.detrend_window_s <= 0:
-            found.append("the detrend window is more than 0 s")
+            found.append("detrend window must be over 0 s")
         return found
 
 
 class Job(NamedTuple):
-    """One unit to process: the .mesc on this machine, where the transfer puts it, the unit, and the run folder."""
+    """A unit to process: the local .mesc, its BioHPC path, the unit, and the run folder."""
 
     local: str
     mesc: str
@@ -93,7 +89,7 @@ def read_attr(group: h5py.Group, name: str, default=None):
 
 
 def list_units(path: Path) -> list[MescUnit]:
-    """Every unit of a .mesc file holding a Channel_0, sessions and units in number order."""
+    """Units with a Channel_0, in number order."""
     units = []
     with h5py.File(path, "r") as f:
         for name_session in sorted((k for k in f if k.startswith("MSession")), key=number):
@@ -123,7 +119,7 @@ def number(name: str) -> tuple[int, str]:
 
 
 def is_runnable(unit: MescUnit, params: Asap7Params) -> bool:
-    """Whether the pipeline can run on unit: a measured movie with a frame rate and frames left after the first frame."""
+    """Whether unit is a movie with a frame rate and frames past first_frame."""
     return (
         unit.role in (ROLE_MEASUREMENT, "")
         and unit.method in METHODS_MOVIE
@@ -133,13 +129,13 @@ def is_runnable(unit: MescUnit, params: Asap7Params) -> bool:
 
 
 def find_mesc(sources: list[Path]) -> list[tuple[Path, str]]:
-    """Each .mesc among the sources, and inside the folders among them, with its path relative to the destination."""
+    """Every .mesc in sources, folders searched, with its path relative to the destination."""
     found = []
     for source in sources:
         if source.is_file() and source.suffix.lower() == SUFFIX_MESC:
             found.append((source, source.name))
         elif source.is_dir():
-            found += [(p, f"{source.name}/{p.relative_to(source).as_posix()}") for p in sorted(source.rglob(f"*{SUFFIX_MESC}"))]
+            found += [(p, f"{source.name}/{p.relative_to(source).as_posix()}") for p in sorted(source.rglob(f"*{SUFFIX_MESC}", case_sensitive=False))]
     return found
 
 
@@ -149,7 +145,7 @@ def dir_save(mesc: str, unit: str, when: datetime) -> str:
 
 
 def remote_path(path: str) -> str:
-    """path quoted for the remote shell, a leading ~/ kept as $HOME so it expands there."""
+    """Quote path for the remote shell, keeping a leading ~/ as $HOME."""
     if path.startswith("~/"):
         return f'"$HOME"/{shlex.quote(path[2:])}'
     return shlex.quote(path)
@@ -159,12 +155,12 @@ def cluster_path(settings: Settings, path: str) -> str:
     """path as BioHPC's nodes see it: mount_base (/biohpc) replaced by cluster_root."""
     base = "/" + settings.mount_base.strip("/")
     if path != base and not path.startswith(f"{base}/"):
-        raise ValueError(f"{path} is outside {base}, the share processing jobs can read")
+        raise ValueError(f"{path} is outside {base}")
     return settings.cluster_root.rstrip("/") + path[len(base) :]
 
 
 def sbatch_command(settings: Settings, job: Job, params: Asap7Params) -> str:
-    """The remote shell command that makes the run folder and submits job, printing the job id."""
+    """Shell command that makes the run folder and submits job; prints the job id."""
     dir_asap7 = settings.dir_asap7.rstrip("/")
     mesc = cluster_path(settings, job.mesc)
     dir_run = cluster_path(settings, job.dir_save)
@@ -208,7 +204,7 @@ def parse_job_id(output: str) -> str:
 
 
 def check_landed(storage: Storage, records: list[dict]) -> None:
-    """Raise OSError unless each record's .mesc is on BioHPC at the size it had here, so nothing runs on a partial copy."""
+    """Raise OSError when a .mesc on BioHPC differs in size from the local one."""
     for mesc, size in {(r["mesc"], r["bytes"]) for r in records}:
         found = {e.name: e.size for e in storage.listdir(posixpath.dirname(mesc))}
         name = posixpath.basename(mesc)
@@ -230,17 +226,9 @@ def new_record(job: Job, params: Asap7Params) -> dict:
 
 def submit(run, settings: Settings, jobs: list[Job], params: Asap7Params, storage: Storage) -> list[dict]:
     """
-    Record one job per unit as waiting, then submit them; any not submitted stay waiting in jobs.json.
+    Save one waiting job per unit to jobs.json, then submit them; any that fail stay waiting.
 
-    Args:
-        run: Runs a remote shell command and returns its output, raising OSError on failure (SshStorage.run)
-        settings (Settings): The partition, GPU, email and where the pipeline lives on BioHPC
-        jobs (list[Job]): The units to process
-        params (Asap7Params): What the pipeline runs with
-        storage (Storage): Where the transfer wrote, to check the files landed whole
-
-    Returns:
-        list[dict]: The jobs' records, each with its job id
+    run runs a remote shell command and returns its output (SshStorage.run).
     """
     records = [new_record(job, params) for job in jobs]
     save_jobs(load_jobs() + records)
@@ -248,7 +236,7 @@ def submit(run, settings: Settings, jobs: list[Job], params: Asap7Params, storag
 
 
 def submit_waiting(run, settings: Settings, records: list[dict], storage: Storage) -> list[dict]:
-    """Check the records' files landed whole, then submit each; jobs.json takes each job id as sbatch prints it."""
+    """Check the files landed, then submit each job, saving its id to jobs.json."""
     check_landed(storage, records)
     for record in records:
         job = Job(record["local"], record["mesc"], record["unit"], record["dir_save"])

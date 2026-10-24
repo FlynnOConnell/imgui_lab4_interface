@@ -1,8 +1,8 @@
 """
-The Lab4 recording identity, the key its Recording row registers under, and the sidecar written beside its data.
+A recording's Lab4 key and the sidecar written beside its data.
 
-The key mirrors Lab4's tables: ExptGroup (experimenter, collection) -> Session (+ subject, datetime) -> Recording
-(+ device). The values each field may take come from the database; see database.Schema.
+The key follows Lab4's tables: ExptGroup (experimenter, collection) -> Session (+ subject, datetime) -> Recording
+(+ device).
 """
 
 import dataclasses
@@ -21,14 +21,14 @@ def parse_datetime(text: str) -> Optional[datetime]:
 @dataclasses.dataclass
 class Recording:
     """
-    One recording's identity and the notes that travel with its data.
+    One recording's Lab4 key and notes.
 
     Attributes:
         collection_name (str): The experiment group, unique per experimenter
-        session_datetime (str): When the session started, YYYY-MM-DD HH:MM
-        subject_fields (dict): Column -> value for the Subject row, used only when the subject is new to Lab4
-        notes (str): The session's notes in Lab4, and the sidecar's
-        extra (list): [key, value] pairs for the sidecar only; rows with an empty key are dropped
+        session_datetime (str): Session start, YYYY-MM-DD HH:MM
+        subject_fields (dict): Subject row values, used only for a new subject
+        notes (str): Session notes, in Lab4 and the sidecar
+        extra (list): [key, value] pairs for the sidecar only; empty keys are dropped
     """
 
     experimenter: str = ""
@@ -59,19 +59,19 @@ class Recording:
         }
 
     def problems(self) -> list[str]:
-        """What keeps the key from registering, whatever the database holds."""
+        """Problems with the key itself, without the database."""
         found = [f"{name} is empty" for name, value in (("experimenter", self.experimenter), ("experiment group", self.collection_name), ("subject", self.subject_id), ("device", self.device_name)) if not value.strip()]
         if parse_datetime(self.session_datetime) is None:
-            found.append("session time is not YYYY-MM-DD HH:MM")
+            found.append("session time must be YYYY-MM-DD HH:MM")
         if self.weight_g.strip():
             try:
                 float(self.weight_g)
             except ValueError:
-                found.append("weight is not a number")
+                found.append("weight must be a number")
         return found
 
     def sidecar(self, user: str) -> dict:
-        """The json written beside transferred data."""
+        """The sidecar json."""
         when = parse_datetime(self.session_datetime)
         return {
             "recording": self.label(),

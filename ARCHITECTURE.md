@@ -2,90 +2,87 @@
 
 ## Modules
 
-- `app.py` — `Lab4App`, the window. An `imgui_data_loader.FileDialog` with no picker buttons hosts it through the
-  `header_draw` / `body_draw` / `footer_draw` slots, as the masknmf launcher does. `body_draw` shows the sign-in
-  card until Lab4 accepts the credentials file or the window works offline, then the rail and the current page. The footer shows what blocks the page's action
-  (`problems()`), or the last outcome, then Sign out, Quit and the page's action (`label_action()` / `act()`).
-- `storage.py` — the `Storage` protocol, `MountedStorage`, `SshStorage` and `Transfer`.
-- `catalog.py` — `Catalog`, the SQLite index, and the rules (`classify_folder`, `classify_file`, `KINDS`) that name
-  a dataset from its listing.
-- `slices.py` — `SliceDatabase`, the human slice table: `patients`, `slices` and `assays` in SQLite, joined on
-  `patient_id` and `slice_id` (renames cascade, parents with children cannot be deleted), and `files`, an index of
-  everything under `ROOT` from one `Storage.walk`. `COLUMNS` types every column the table page edits through. Rows
-  carry an `owner`; `can_edit` (owner or `ADMIN`) is checked in the database on every update and delete.
-  `match_files` finds a slice's files from its `file_match`, `file_dates` reading every date spelling the lab uses.
-  A file from another `VERSION_SCHEMA` is renamed aside, not dropped.
-- `viewers.py` — the command a dataset's kind opens with, and the detached launch.
-- `lab4.py` — `Recording`: the Lab4 Recording key, its details, a new subject's fields, and the sidecar dict.
-- `database.py` — `Credentials` (the website's credentials file), `Lab4Database` (sign-in, `schema`, `register`,
-  `recordings`) and `Schema`, the tables as the database has them now.
-- `processing.py` — overnight processing: `list_units` (a `.mesc`'s units from its headers, with h5py),
-  `sbatch_command` (one job per unit, running `pml_utilities/hpc/asap7/run_asap7.sh`), `submit` (checks the
-  transferred files' sizes first) and `jobs.json`.
-- `config.py` — `Settings` and `data_dir()`.
+- `app.py`: `Lab4App`, the window. An `imgui_data_loader.FileDialog` hosts it through `header_draw`, `body_draw`
+  and `footer_draw`. The body shows the sign-in card until Lab4 accepts the credentials (or the user works
+  offline), then the rail and the current page. The footer shows why the page's action is blocked (`problems()`)
+  or the last message, then Sign out, Quit and the action (`label_action()` / `act()`).
+- `storage.py`: the `Storage` protocol, `MountedStorage`, `SshStorage` and `Transfer`.
+- `catalog.py`: `Catalog`, the SQLite index, and `classify_folder`, `classify_file` and `KINDS`, which name a
+  dataset from its listing.
+- `slices.py`: `SliceDatabase`, the human slice tables in SQLite. `patients`, `slices` and `assays` join on
+  `patient_id` and `slice_id`; renames cascade and parents with children cannot be deleted. `files` is an index of
+  everything under `ROOT`. `COLUMNS` types every editable column. Rows have an `owner`, and `can_edit` (owner or
+  `ADMIN`) is checked on every update and delete. `match_files` finds a slice's files from its `file_match`. A file
+  from another `VERSION_SCHEMA` is renamed aside, not dropped.
+- `viewers.py`: the command each dataset kind opens with, and the detached launch.
+- `lab4.py`: `Recording`, the Lab4 key, its details, a new subject's fields, and the sidecar.
+- `database.py`: `Credentials`, `Lab4Database` (sign-in, `schema`, `register`, `recordings`) and `Schema`, the
+  tables as they are now.
+- `processing.py`: `list_units` reads a `.mesc`'s units with h5py, `sbatch_command` builds one job per unit running
+  `pml_utilities/hpc/asap7/run_asap7.sh`, and `submit` checks the files landed whole first. Jobs are kept in
+  `jobs.json`.
+- `config.py`: `Settings` and `data_dir()`.
 
 ## Threads
 
-Every storage call runs on the app's `ThreadPoolExecutor` via `submit(name, fn, *args)`. `poll()` runs at the top of
-each frame and lands finished futures by name (`sign_in`, `check`, `list`, `sidecar`, `attach`, `transfer`, `dest_check`, `picker`,
-`register`, `refresh`, `subject`, ...). A destination is checked once per value typed (`destination_state`: exists, new,
-or why not); `Transfer.run` makes it with `Storage.mkdir`, one level only. Database calls run there too; each opens
-its own connection. A `Transfer`
-exposes `done` / `total` / `current` counters the window reads while it runs, and `cancelled` to stop it between
-chunks.
+Every storage and database call runs on the app's `ThreadPoolExecutor` through `submit(name, fn, *args)`. `poll()`
+runs at the top of each frame and handles finished futures by name (`sign_in`, `check`, `list`, `transfer`, ...).
+Each database call opens its own connection. Send measures the sources on a worker (`sizes`) and opens its dialog
+when that lands. One `files_index` runs at a time; if the storage changed while it ran, it runs again. A `Transfer` has `done`, `total` and `current` counters the window
+reads while it runs, and `cancelled` to stop it between chunks.
 
-Processing is chained in `poll()`: `act` fixes the jobs when Send is pressed, and a `transfer` that lands without
-an error submits them as `process`; a failed or cancelled transfer submits nothing. Jobs go through
-`SshStorage.run` on `Settings.ssh_host` whatever the storage backend.
+The destination is checked once per value typed (`destination_state`: exists, new, or why not). `Transfer.run`
+makes at most one new folder.
+
+Processing is chained in `poll()`: `act` fixes the jobs when Send is pressed, and a `transfer` that finishes without
+an error submits them as `process`. A failed or cancelled transfer submits nothing. Jobs always go through
+`SshStorage.run` on `Settings.processing_host`, whatever the storage backend.
 
 ## Paths and remote access
 
-A `Storage` takes BioHPC's own posix paths (`/biohpc/data2/...`, the paths Lab4 stores) and maps them to whatever it
-talks to: `MountedStorage` maps its base (`/biohpc`) onto a local mount root, `SshStorage` runs commands over `ssh -o BatchMode=yes` and
-streams writes through `cat`. The window only ever calls the protocol (`check`, `exists`, `listdir`, `read_text`,
-`open_write`), so a remote service backend (http, Globus) is one more class and one more branch in
-`open_storage`.
+A `Storage` takes BioHPC paths (`/biohpc/data2/...`, the paths Lab4 stores). `MountedStorage` maps its base
+(`/biohpc`) onto a local mount root. `SshStorage` runs commands over `ssh -o BatchMode=yes` and streams writes
+through `cat`. The window only calls the protocol (`check`, `exists`, `listdir`, `read_text`, `open_write`, ...), so
+another backend (http, Globus) is one more class and one more branch in `open_storage`.
 
 ## Lab4 database
 
-The website provisions a Postgres role per lab member (`lab4_u_<gitlab id>`, granted `lab4_user`: select, insert and
+The website makes a Postgres role per lab member (`lab4_u_<gitlab id>`, granted `lab4_user`: select, insert and
 update on the `lab4` schema, no delete) and hands out its credentials file. The window signs in with that file and
-talks plain SQL, as the website does, rather than importing the `lab4` package.
+uses plain SQL, as the website does, instead of importing the `lab4` package.
 
-`Lab4Database.schema` reads columns from `information_schema` and primary and foreign keys from `pg_constraint`
+`Lab4Database.schema` reads columns from `information_schema`, and primary and foreign keys from `pg_constraint`
 (`information_schema` hides keys on tables the user does not own). A foreign key into a `#lookup` table makes that
-column a choice; a subject column that is NOT NULL without a default is required for a new subject. Nothing about
-the tables' shape is hardcoded beyond the Recording key, so the dev fixtures' `subject.species` and lab4.tables'
-`genotype` / `brain_location` / `dob` / `sex` both work.
+column a choice. A subject column that is NOT NULL without a default is required for a new subject. Only the
+Recording key is hardcoded, so both the dev fixtures' and `lab4.tables`' subject columns work.
 
-`register` inserts ExptGroup, Subject and Session when their key is missing (checked first: NOT NULL fires before
-`ON CONFLICT`), then Recording, in one transaction. `data_path` must be under `/biohpc`.
+`register` inserts ExptGroup, Subject and Session when their key is missing (checked first, since NOT NULL fires
+before `ON CONFLICT`), then Recording, in one transaction. `data_path` must be under `/biohpc`.
 
 ## Catalog
 
-`Catalog.scan(storage, root)` takes one `Storage.walk` (an `os.scandir` walk, or one `find -printf` over ssh), reads
-only the sidecars' contents, and classifies bottom-up so a folder knows its subfolders' kinds (a `suite2p-run` is a
-folder holding `suite2p-plane`s). Hidden folders and `.zarr` folders are listed but not entered. A scan replaces
-every row under its root; the totals of folders above the root go stale until they are scanned themselves.
+`Catalog.scan(storage, root)` takes one `Storage.walk` (`os.scandir`, or one `find -printf` over ssh), reads only
+the sidecars, and classifies bottom-up so a folder knows its subfolders' kinds (a `suite2p-run` holds
+`suite2p-plane`s). Hidden and `.zarr` folders are listed but not entered. A scan replaces every row under its root;
+folders above the root keep stale totals until they are scanned.
 
-| table | row per | holds |
-|-------|---------|-------|
-| `datasets` | file or folder a viewer opens | kind, detail, files, bytes, newest mtime, whether a sidecar is beside it |
-| `folders` | folder | files and bytes beneath it, newest mtime, `kinds` json of the datasets beneath it |
+| table | one row per | holds |
+|-------|-------------|-------|
+| `datasets` | file or folder a viewer opens | kind, detail, files, bytes, newest mtime, whether it has a sidecar |
+| `folders` | folder | files and bytes below it, newest mtime, `kinds` json of the datasets below it |
 | `metadata` | sidecar | the path it describes, recording, subject, session date, experimenter, the full json |
 | `scans` | scan root | when, items listed, seconds |
 
-Every table is keyed by `(storage, path)` with `storage` the backend's label, so one file holds several backends.
-The schema is plain SQL to carry over to the lab's database server. Browse reads it through `Catalog.describe`.
+Every table is keyed by `(storage, path)`, with `storage` the backend's label, so one file holds several backends.
 
 ## Writes and the confirm dialog
 
-`Storage` never deletes, moves or renames; `open_write` and `mkdir` are its only writes, reached from `Transfer.run`
-and `write_text`. The window never calls those directly: `act()` and the slice page's Delete / Reset build
-`self.confirm` (title, lines, button, and the call to run), and `draw_body` shows it as one modal that runs the
-call only on its button. Copies down (`storage.download`) go through the same modal and write only under
-`cache/`, through a `.part` file. Export goes through the system save dialog. `tests/test_confirm.py` checks that
-each of these leaves the files alone until confirmed.
+`Storage` never deletes, moves or renames; `open_write` and `mkdir` are its only writes, used by `Transfer.run` and
+`write_text`. The window never calls them directly: `act()` (Send through `confirm_send`) and the slice page's Delete and Reset set
+`self.confirm` (title, lines, button, and the call to run), and `draw_body` shows it as a modal that runs the call
+only on its button. Downloads (`storage.download`) go through the same modal and write only under `cache/`, through
+a `.part` file. Export uses the system save dialog. `tests/test_confirm.py` checks that each of these leaves files
+alone until confirmed.
 
 ## Sidecars
 
@@ -94,9 +91,9 @@ each of these leaves the files alone until confirmed.
 
 ## Gotchas
 
-- A selectable reports a click on mouse release but `is_mouse_double_clicked` is true on the second press; rows that
-  act on a double-click need `SelectableFlags_.allow_double_click`. `tests/test_browse_clicks.py` drives real clicks
-  through the test engine, in a subprocess because the null backend's teardown corrupts imgui for later windows.
+- A selectable reports a click on mouse release, but `is_mouse_double_clicked` is true on the second press. Rows
+  that act on a double-click need `SelectableFlags_.allow_double_click`. `tests/test_browse_clicks.py` drives real
+  clicks through the test engine in a subprocess, because the null backend's teardown breaks imgui for later windows.
 - hello_imgui loads Font Awesome glyphs only up to U+F2E0. Icons past it (`ICON_FA_ROTATE`,
-  `ICON_FA_RIGHT_FROM_BRACKET`, `ICON_FA_FOLDER_TREE`) render as `?`; pick one below.
+  `ICON_FA_RIGHT_FROM_BRACKET`, `ICON_FA_FOLDER_TREE`) render as `?`.
 - Headless tests run on hello_imgui's null backend, which needs `renderer_has_textures` set in `post_init`.

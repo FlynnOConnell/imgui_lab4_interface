@@ -1,4 +1,4 @@
-"""Per-user settings, and the folder everything this app writes lives under."""
+"""User settings and the app's data folder."""
 
 import dataclasses
 import json
@@ -26,30 +26,33 @@ def data_dir() -> Path:
 @dataclasses.dataclass
 class Settings:
     """
-    How this machine reaches BioHPC and where data may be sent.
+    How this machine reaches BioHPC, and how processing jobs run.
 
     Attributes:
-        backend (str): "mounted" for a share mounted on this machine, "ssh" for a host reached over ssh
-        mount_root (str): The local folder the share is mounted at
-        mount_base (str): The BioHPC path mount_root shows, e.g. /biohpc for a drive mapped to /biohpc
-        ssh_host (str): An ssh alias or user@host whose keys are already set up
-        destinations (list): [path, description] pairs offered on the Transfer page
-        command_mbo (str): The mbo executable, a name on PATH or a full path
-        command_masknmf (str): The masknmf executable, a name on PATH or a full path
-        partition (str): The SLURM partition processing jobs run on, one with GPUs
-        gres (str): The GPUs a processing job asks for, e.g. gpu:1; empty asks for none
-        email (str): Where SLURM writes when a processing job ends or fails; empty for no mail
-        dir_asap7 (str): The folder on BioHPC holding run_asap7.sh, which runs `mbo asap7`; ~/ is the BioHPC home
-        cluster_root (str): Where mount_base is on BioHPC's own nodes, e.g. the lab's /project folder the /biohpc share mounts
+        backend (str): "mounted" or "ssh"
+        mount_root (str): Local folder the share is mounted at
+        mount_base (str): BioHPC path of mount_root, e.g. /biohpc
+        ssh_host (str): ssh alias or user@host of a machine with /biohpc mounted, keys already set up
+        destinations (list): [path, description] pairs offered on Transfer
+        command_mbo (str): mbo executable, on PATH or a full path
+        command_masknmf (str): masknmf executable, on PATH or a full path
+        processing_host (str): ssh alias or user@host of a BioHPC login node, where jobs are submitted
+        partition (str): SLURM partition with GPUs
+        gres (str): GPUs per job, e.g. gpu:1; empty for none
+        email (str): SLURM mail address; empty for none
+        dir_asap7 (str): BioHPC folder holding run_asap7.sh; ~/ is the BioHPC home
+        cluster_root (str): Where mount_base is on BioHPC nodes
     """
 
     backend: str = "mounted"
     mount_root: str = ""
     mount_base: str = "/biohpc"
-    ssh_host: str = "biohpc"
+    # the lab server's alias, as in pml_utilities
+    ssh_host: str = "lab-research"
     destinations: list = dataclasses.field(default_factory=lambda: [list(d) for d in DESTINATIONS])
     command_mbo: str = "mbo"
     command_masknmf: str = "masknmf"
+    processing_host: str = "biohpc"
     partition: str = ""
     gres: str = "gpu:1"
     email: str = ""

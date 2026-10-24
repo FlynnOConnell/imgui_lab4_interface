@@ -37,6 +37,7 @@ def test_a_new_folder_is_made_on_send(tmp_path, monkeypatch):
     assert destination(app, "/biohpc/data2/M231/") == []
     assert app.dest_state == "new"
     app.act()
+    settle(app)
     app.confirm["run"](*app.confirm["args"])
     settle(app)
     assert not app.failed, app.message
@@ -50,7 +51,7 @@ def test_only_one_new_folder_and_never_a_file(tmp_path, monkeypatch):
     app = transfer_app(tmp_path, monkeypatch)
     assert destination(app, "/biohpc/data2/M231/raw") == ["/biohpc/data2/M231 does not exist; a transfer makes at most one new folder"]
     assert destination(app, "/biohpc/data2/notes.txt") == ["/biohpc/data2/notes.txt is a file"]
-    assert destination(app, "data2/M231") == ["the destination is a BioHPC path, e.g. /biohpc/data2/M231"]
+    assert destination(app, "data2/M231") == ["destination must be a BioHPC path, e.g. /biohpc/data2/M231"]
     assert destination(app, "") == ["choose a destination folder"]
     assert not (tmp_path / "mount" / "data2" / "M231").exists()
 

@@ -1,10 +1,11 @@
 import json
+import shutil
 from datetime import datetime
 
 import pytest
 
 from imgui_lab4_interface import SIDECAR_SUFFIX, MountedStorage, Recording, Settings, Transfer, open_storage, SshStorage
-from imgui_lab4_interface.storage import destination_state, shows
+from imgui_lab4_interface.storage import SshReader, destination_state, download, shows
 
 
 def test_transfer_copies_files_and_folders_with_sidecars(tmp_path):
@@ -147,3 +148,35 @@ def test_destination_state(tmp_path):
         destination_state(storage, "/biohpc/data2/M232/raw")
     with pytest.raises(OSError, match="is a file"):
         destination_state(storage, "/biohpc/data2/notes.txt")
+
+
+def test_walk_raises_when_the_root_is_unreachable(tmp_path):
+    with pytest.raises(OSError, match="no mount root"):
+        list(MountedStorage("").walk("/x"))
+    with pytest.raises(OSError, match="not found"):
+        list(MountedStorage(str(tmp_path)).walk("/missing"))
+
+
+def test_a_cancelled_download_leaves_nothing(tmp_path):
+    (tmp_path / "mount").mkdir()
+    (tmp_path / "mount" / "big.mesc").write_bytes(b"x" * 10)
+    local = tmp_path / "cache" / "big.mesc"
+    with pytest.raises(InterruptedError, match="cancelled"):
+        download(MountedStorage(str(tmp_path / "mount")), "/big.mesc", local, {"done": 0, "cancelled": True})
+    assert not local.exists() and not local.with_name("big.mesc.part").exists()
+
+
+@pytest.mark.skipif(shutil.which("sh") is None, reason="needs sh to stand in for ssh")
+def test_an_error_while_reading_over_ssh_is_not_replaced(tmp_path):
+    (tmp_path / "big").write_bytes(b"x" * (4 << 20))
+    with pytest.raises(InterruptedError, match="stop"):
+        with SshReader(["sh", "-c"], str(tmp_path / "big")) as src:
+            src.read(10)
+            raise InterruptedError("stop")
+
+
+def test_an_unset_mount_root_reaches_nothing():
+    storage = MountedStorage("", "/biohpc")
+    for call in (storage.check, lambda: storage.listdir("/biohpc"), lambda: destination_state(storage, "/biohpc/data2")):
+        with pytest.raises(OSError, match="no mount root set"):
+            call()

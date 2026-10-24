@@ -99,3 +99,18 @@ def test_one_detected_mount_fills_an_unset_root(tmp_path, monkeypatch):
     wait(list(ambiguous.futures.values()))
     ambiguous.poll()
     assert ambiguous.settings.mount_root == ""
+
+
+def test_no_mount_found_at_startup_means_ssh(tmp_path, monkeypatch):
+    from concurrent.futures import wait
+
+    monkeypatch.setenv("IMGUI_LAB4_HOME", str(tmp_path))
+    app = Lab4App(Settings())
+    wait(list(app.futures.values()))
+    app.poll()
+    assert (app.settings.backend, app.settings.ssh_host) == ("ssh", "lab-research")
+    app.settings.backend = "mounted"
+    app.detect_mounts()
+    wait(list(app.futures.values()))
+    app.poll()
+    assert app.settings.backend == "mounted"

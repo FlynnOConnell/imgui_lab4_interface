@@ -1,13 +1,8 @@
 """
-Where data goes: a Storage protocol over BioHPC paths, the two ways this machine reaches them, and a Transfer
-that copies local files into one.
+BioHPC storage, over a mounted share or ssh, and Transfer, which copies local files to it.
 
-Paths given to a Storage are always BioHPC's own posix paths (/biohpc/data2/...), the paths Lab4 stores; each backend maps them
-to whatever it talks to. The window only ever sees the protocol, so a remote backend (an http service, Globus)
-slots in by implementing it.
-
-Nothing here deletes, moves or renames anything on storage. The ways to change it are open_write and mkdir, and the
-window asks before every call that reaches them (Transfer, attaching a sidecar).
+Paths are always BioHPC paths (/biohpc/data2/...), the ones Lab4 stores. Nothing here deletes, moves or renames;
+open_write and mkdir are the only writes.
 """
 
 import json
@@ -35,7 +30,7 @@ class Entry(NamedTuple):
 
 
 class Record(NamedTuple):
-    """One file or folder a walk found; a hidden or .zarr folder is listed but not entered."""
+    """A file or folder found by walk; hidden and .zarr folders are listed but not entered."""
 
     path: str
     is_dir: bool
@@ -56,28 +51,28 @@ class Storage(Protocol):
     def read_text(self, path: str) -> str: ...
 
     def mkdir(self, path: str) -> None:
-        """Make the folder when missing; its parent must exist."""
+        """Make the folder if missing; its parent must exist."""
 
     def open_read(self, path: str) -> BinaryIO:
-        """The file at path to read in chunks; closing it ends the read."""
+        """Open path for reading."""
 
     def open_write(self, path: str) -> BinaryIO:
-        """A writable binary file at path, its parent folders made; closing it finishes the write."""
+        """Open path for writing, making its parent folders."""
 
     def walk(self, root: str) -> Iterator[Record]:
         """Everything under root, root itself excluded."""
 
     def local_path(self, path: str) -> Optional[Path]:
-        """Where path is on this machine, for a viewer to open; None when it is not reachable as a file here."""
+        """path on this machine, or None when it is not a local file."""
 
 
 class MountedStorage:
     """
-    BioHPC paths resolved under a local folder the share is mounted at, e.g. drive X: mapped to /biohpc.
+    BioHPC through a local mount, e.g. X: mapped to /biohpc.
 
     Args:
-        root (str): The local folder
-        base (str): The BioHPC path root shows; paths outside it are not reachable here
+        root (str): The local mount folder
+        base (str): The BioHPC path root maps to
     """
 
     def __init__(self, root: str, base: str = "/"):
@@ -86,14 +81,15 @@ class MountedStorage:
         self.label = f"{root} ({self.base})" if str(root) else "no mount root"
 
     def local(self, path: str) -> Path:
+        if str(self.root) == ".":
+            raise OSError("no mount root set; set one in Settings > Connection")
         relative = posixpath.relpath(posixpath.normpath(path), self.base)
         if relative == ".." or relative.startswith("../"):
-            raise OSError(f"{path} is outside {self.base}, the folder {self.root} shows")
+            raise OSError(f"{path} is outside {self.base}")
         return self.root if relative == "." else self.root / relative
 
     def check(self) -> None:
-        if not str(self.root) or str(self.root) == ".":
-            raise OSError("no mount root set; choose one on the Storage page")
+        self.local(self.base)
         if not self.root.is_dir():
             raise OSError(f"{self.root} is not reachable")
 
@@ -119,7 +115,11 @@ class MountedStorage:
         return target.open("wb")
 
     def walk(self, root: str) -> Iterator[Record]:
-        stack = [(self.local(root), root.rstrip("/"))]
+        self.check()
+        top = self.local(root)
+        if not top.is_dir():
+            raise OSError(f"{root} not found under {self.root}")
+        stack = [(top, root.rstrip("/"))]
         while stack:
             folder, remote = stack.pop()
             try:
@@ -139,7 +139,7 @@ class MountedStorage:
 
 
 class SshReader:
-    """A remote file streamed out of `cat` over ssh; close raises when the remote side failed."""
+    """Reads a remote file through ssh `cat`; close raises if it failed."""
 
     def __init__(self, base: list[str], path: str):
         self.path = path
@@ -157,12 +157,18 @@ class SshReader:
     def __enter__(self) -> "SshReader":
         return self
 
-    def __exit__(self, *exc) -> None:
-        self.close()
+    def __exit__(self, kind, *exc) -> None:
+        # on an error, stop ssh instead of raising its broken-pipe failure over the error
+        if kind is None:
+            self.close()
+            return
+        self.proc.kill()
+        self.proc.wait()
+        self.proc.stdout.close()
 
 
 class SshWriter:
-    """A remote file fed through `cat` over ssh; close raises when the remote side failed."""
+    """Writes a remote file through ssh `cat`; close raises if it failed."""
 
     def __init__(self, base: list[str], path: str):
         command = f"mkdir -p {shlex.quote(posixpath.dirname(path))} && cat > {shlex.quote(path)}"
@@ -186,7 +192,7 @@ class SshWriter:
 
 
 class SshStorage:
-    """BioHPC reached over ssh with keys already set up; it never prompts, so a missing key fails fast."""
+    """BioHPC over ssh. BatchMode never prompts, so a missing key fails fast."""
 
     def __init__(self, host: str):
         self.host = host
@@ -243,7 +249,7 @@ class SshStorage:
 
 
 class Mount(NamedTuple):
-    """A folder on this machine and the remote share it shows."""
+    """A local mount folder and its remote share."""
 
     root: str
     remote: str
@@ -255,7 +261,7 @@ def shows(remote: str, base: str) -> bool:
 
 
 def mapped_drives() -> list[Mount]:
-    """This logon session's mapped drive letters and their shares (Windows); another user's mappings are not seen."""
+    """Mapped drive letters and their shares for this Windows logon."""
     import ctypes
     import string
 
@@ -288,7 +294,7 @@ def mounted_shares() -> list[Mount]:
 
 
 def find_mounts(base: str = "/biohpc") -> list[Mount]:
-    """The folders on this machine that show base, found by what they point at rather than their drive letter."""
+    """Local folders whose remote share is base."""
     mounts = mapped_drives() if sys.platform == "win32" else mounted_shares()
     return [m for m in mounts if shows(m.remote, base)]
 
@@ -300,16 +306,12 @@ def open_storage(settings: Settings) -> Storage:
 
 
 def destination_state(storage: Storage, path: str) -> tuple[str, str]:
-    """
-    (path, "exists") for a folder already there, (path, "new") for one a transfer would make; raises OSError when its
-    parent is missing, since a transfer makes at most one new folder, or when path is a file.
-    """
+    """(path, "exists") or (path, "new"); raises OSError when the parent is missing or path is a file."""
     parent, name = posixpath.split(path.rstrip("/"))
-    try:
-        entries = storage.listdir(parent or "/")
-    except OSError as e:
-        raise OSError(f"{parent or '/'} does not exist; a transfer makes at most one new folder") from e
-    for entry in entries:
+    parent = parent or "/"
+    if not storage.exists(parent):
+        raise OSError(f"{parent} does not exist; a transfer makes at most one new folder")
+    for entry in storage.listdir(parent):
         if entry.name == name:
             if not entry.is_dir:
                 raise OSError(f"{path} is a file")
@@ -318,18 +320,19 @@ def destination_state(storage: Storage, path: str) -> tuple[str, str]:
 
 
 def download(storage: Storage, path: str, local: Path, progress: dict) -> Path:
-    """
-    Copy path from storage to local through local.part, counting bytes into progress["done"]; storage is only read.
-    The .part file is replaced into local once whole, so a failed copy never leaves a short file at local.
-    """
+    """Copy path to local through a .part file, counting bytes in progress["done"]; a failed copy leaves nothing."""
     local.parent.mkdir(parents=True, exist_ok=True)
     part = local.with_name(local.name + ".part")
-    with storage.open_read(path) as src, part.open("wb") as dst:
-        while chunk := src.read(SIZE_CHUNK):
-            if progress.get("cancelled"):
-                raise InterruptedError(f"copy of {posixpath.basename(path)} cancelled; {part} is left partly written")
-            dst.write(chunk)
-            progress["done"] += len(chunk)
+    try:
+        with storage.open_read(path) as src, part.open("wb") as dst:
+            while chunk := src.read(SIZE_CHUNK):
+                if progress.get("cancelled"):
+                    raise InterruptedError(f"copy of {posixpath.basename(path)} cancelled")
+                dst.write(chunk)
+                progress["done"] += len(chunk)
+    except BaseException:
+        part.unlink(missing_ok=True)
+        raise
     os.replace(part, local)
     return local
 
@@ -341,15 +344,13 @@ def write_text(storage: Storage, path: str, text: str) -> None:
 
 class Transfer:
     """
-    Copies local files and folders into a destination folder, each under its own name, with a sidecar of
-    metadata beside each when given. Run it on a worker thread and read its counters from the window.
+    Copies local files and folders into dest under their own names, with a sidecar beside each when metadata is
+    given. Run it on a worker; the window reads its counters.
 
     Args:
-        storage (Storage): Where to copy to
-        sources (list[Path]): Files and folders on this machine
-        dest (str): The BioHPC folder they land in, made when missing; its parent must exist
-        metadata (dict | None): Written as <name>.lab4.json beside each source, with the source's local path added
-        overwrite (bool): Whether a source already at the destination is replaced instead of refused
+        dest (str): BioHPC folder, made when missing; its parent must exist
+        metadata (dict | None): Written as <name>.lab4.json beside each source
+        overwrite (bool): Replace existing files instead of stopping
     """
 
     def __init__(self, storage: Storage, sources: list[Path], dest: str, metadata: Optional[dict], overwrite: bool):
@@ -386,7 +387,7 @@ class Transfer:
             with local.open("rb") as src, self.storage.open_write(remote) as dst:
                 while chunk := src.read(SIZE_CHUNK):
                     if self.cancelled:
-                        raise InterruptedError(f"cancelled during {remote}; it is left partly written")
+                        raise InterruptedError(f"cancelled; {remote} is incomplete")
                     dst.write(chunk)
                     self.done += len(chunk)
         if self.metadata is not None:

@@ -1,6 +1,7 @@
 import json
 import shlex
 from datetime import datetime
+from types import SimpleNamespace
 
 import h5py
 import numpy as np
@@ -164,13 +165,14 @@ def processing_app(tmp_path, monkeypatch):
 
 def test_transfer_page_submits_the_units_chosen_once_sent(tmp_path, monkeypatch):
     app = processing_app(tmp_path, monkeypatch)
-    assert app.problems() == ["choose the units to process"]
+    assert app.problems() == ["pick units to process"]
     app.chosen = {(str(tmp_path / "scan.mesc"), "MSession_0/MUnit_14")}
     assert app.problems() == []
     assert app.label_action().endswith("Send 1 item, process 1 unit")
     commands = []
     monkeypatch.setattr(app, "run_remote", lambda command: commands.append(command) or "777")
     app.act()
+    settle(app)
     app.confirm["run"](*app.confirm["args"])
     settle(app)
     assert not app.failed, app.message
@@ -188,9 +190,10 @@ def test_the_window_keeps_jobs_biohpc_refused_and_submits_them_later(tmp_path, m
 
     monkeypatch.setattr(app, "run_remote", refuse_ssh)
     app.act()
+    settle(app)
     app.confirm["run"](*app.confirm["args"])
     settle(app)
-    assert app.failed and app.message.startswith("1 job(s) wait to be submitted")
+    assert app.failed and app.message.startswith("1 job(s) not submitted")
     assert (tmp_path / "mount" / "data2" / "M231" / "scan.mesc").is_file()
     assert [job["job_id"] for job in app.jobs] == [None]
 
@@ -207,6 +210,7 @@ def test_a_failed_transfer_submits_nothing(tmp_path, monkeypatch):
     (tmp_path / "mount" / "data2" / "M231" / "scan.mesc").write_bytes(b"old")
     monkeypatch.setattr(app, "run_remote", lambda command: pytest.fail("submitted after a failed transfer"))
     app.act()
+    settle(app)
     app.confirm["run"](*app.confirm["args"])
     settle(app)
     assert app.failed and "already exists" in app.message
@@ -217,13 +221,13 @@ def test_processing_needs_a_partition_and_a_mesc(tmp_path, monkeypatch):
     app = processing_app(tmp_path, monkeypatch)
     app.settings.partition = ""
     app.chosen = {(str(tmp_path / "scan.mesc"), "MSession_0/MUnit_14")}
-    assert app.problems() == ["set the GPU partition processing runs on, in Settings > Processing"]
+    assert app.problems() == ["set a GPU partition in Settings > Processing"]
     app.settings.partition = "p"
     app.sources = [str(tmp_path / "rec.tif")]
-    assert app.problems() == ["reading the .mesc files' units"]
+    assert app.problems() == ["reading .mesc units..."]
     app.read_mesc()
     settle(app)
-    assert app.problems() == ["processing runs on .mesc files; none of the sources is or holds one"]
+    assert app.problems() == ["no .mesc files in the sources"]
     assert app.chosen == set()
 
 
@@ -266,3 +270,11 @@ def test_processing_widgets_render(tmp_path, monkeypatch):
     except Exception as e:
         pytest.skip(f"null backend unavailable: {e}")
     assert draw.frames == 3
+
+
+def test_jobs_go_to_the_processing_host_not_the_storage_host(tmp_path, monkeypatch):
+    app = transfer_app(tmp_path, monkeypatch)
+    app.settings.ssh_host, app.settings.processing_host = "lab-research", "login-node"
+    hosts = []
+    monkeypatch.setattr("imgui_lab4_interface.app.SshStorage", lambda host: hosts.append(host) or SimpleNamespace(run=lambda command: "ok"))
+    assert app.run_remote("sinfo") == "ok" and hosts == ["login-node"]
