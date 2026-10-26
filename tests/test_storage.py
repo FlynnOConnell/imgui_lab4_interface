@@ -4,6 +4,7 @@ import shutil
 import sys
 import time
 from datetime import datetime
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -117,6 +118,29 @@ def test_recording_problems_label_and_key():
     assert sidecar["extra"] == {"rig": "B"}
     assert sidecar["key"]["session_datetime"] == "2026-08-21 14:30:00"
     json.dumps(sidecar)
+
+
+def test_a_sidecar_and_a_lab4_row_load_back_into_the_form():
+    rec = Recording(
+        experimenter="Eunji Kong",
+        collection_name="place cells",
+        subject_id="M231",
+        session_datetime="2026-08-21 14:30",
+        device_name="Bruker 1 Imaging",
+        ui_label="day 1",
+        weight_g="24.5",
+        subject_fields={"genotype": "WT"},
+        notes="first session",
+        extra=[["rig", "B"]],
+    )
+    assert Recording.from_sidecar(json.loads(json.dumps(rec.sidecar(user="loson")))) == rec
+    # an older sidecar without the newer fields still loads
+    assert Recording.from_sidecar({"key": {"subject_id": "M231", "session_datetime": "2026-08-21 14:30:05"}}).session_datetime == "2026-08-21 14:30:05"
+
+    row = {**rec.key(), "data_path": "/biohpc/data2/rec.h5", "ui_label": None, "weight_g": Decimal("24.50")}
+    loaded = Recording.from_lab4(row, "first session", {"genotype": "WT"})
+    assert (loaded.session_datetime, loaded.ui_label, loaded.weight_g) == ("2026-08-21 14:30", "", "24.50")
+    assert loaded.key() == rec.key()
 
 
 def test_shows_matches_the_share_not_the_letter():

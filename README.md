@@ -51,15 +51,22 @@ lab4
 4. **Browse storage.** List BioHPC folders and see which items have metadata. Select one to attach a sidecar.
    **Scan** catalogs a folder and everything under it. Double-click a folder to enter it, or a dataset to open it.
    Select an `.h5` (from `lab4.convert`) to **Register in Lab4**; new experiment groups, subjects and sessions are
-   added in the same transaction.
-5. **Results.** One row per recording and unit, with its frame rate, frames, indicator, the masknmf and vnoiser
+   added in the same transaction. A database icon marks files that are a Lab4 recording's data; **Show in Lab4**
+   opens one. **Load into the form** fills the metadata form from the selected item's sidecar.
+5. **Lab4 recordings.** Every recording in Lab4, filterable. Pick one to edit its label, weight and data path, its
+   session's notes, and its subject's columns, or add an injection (where the server has the Injection table). **Save to Lab4** lists the changes and asks first.
+   The key (experimenter, group, subject, session start, device) cannot change here: other rows point at it, and lab
+   members cannot delete. With a sidecar beside the data, Save can rewrite it with the saved values, keeping its
+   extra fields. **Refresh** keeps unsaved edits and takes what others changed elsewhere. Double-click a recording,
+   or **Show in Browse**, to list its folder; **Use in the metadata form** copies it to Transfer's and Browse's form.
+6. **Results.** One row per recording and unit, with its frame rate, frames, indicator, the masknmf and vnoiser
    runs on it and their figures and tables, from every machine. Pick a row to open its data in `mbo`, a run in
    `masknmf view` or its log, or double-click a result file. **Scan machines** catalogs every machine's folders;
    `lab4-scan [machine ...]` does the same headless, e.g. from a timer. Units come from `.mesc` headers (read only
    where the file opens in place) and `<recording>__MSession_N_MUnit_N.tif` exports; runs and results are matched
    to them by the recording and unit names in their paths and inputs. A machine that doesn't answer keeps its last
    scan.
-6. **Human slices.** Track human slices, with demo rows seeded from Shobhana's files in `/biohpc/data4/Shobhana`.
+7. **Human slices.** Track human slices, with demo rows seeded from Shobhana's files in `/biohpc/data4/Shobhana`.
    A slice's `file_match` finds its files: every word must be in the path, a `YYYY-MM-DD` word matches any spelling
    of that date (`7-27-2026`, `260727`, `May21st_2026`), and `-word` excludes. Filter the tables with words,
    `column:value`, or `column=value` for an exact match. Double-click a file to open it; over
@@ -116,6 +123,8 @@ Nothing is deleted, moved or renamed on BioHPC. Every action that writes data or
 |--------|--------|-----------|
 | Transfer: Send | the sources and sidecars, then any processing jobs; with overwrite on, replaces what is there | Send to BioHPC? |
 | Browse: Attach metadata | `<name>.lab4.json` | Attach metadata? |
+| Lab4 recordings: Save to Lab4 | the recording's, session's and subject's columns outside the key, then, if ticked, the sidecar beside its data | Save to Lab4? |
+| Lab4 recordings: Add injection | an Injection row | Add to Lab4? |
 | Human slices: open a file over ssh | a copy in `cache/` | Copy to this machine? |
 | Human slices: Export | a csv | the system save dialog |
 | Human slices: Delete, Reset rows | rows in `slices.sqlite` | Delete rows?, Reset rows? |

@@ -15,9 +15,10 @@
   `ADMIN`) is checked on every update and delete. `match_files` finds a slice's files from its `file_match`. A file
   from another `VERSION_SCHEMA` is renamed aside, not dropped.
 - `viewers.py`: the command each dataset kind opens with, and the detached launch.
-- `lab4.py`: `Recording`, the Lab4 key, its details, a new subject's fields, and the sidecar.
-- `database.py`: `Credentials`, `Lab4Database` (sign-in, `schema`, `register`, `recordings`) and `Schema`, the
-  tables as they are now.
+- `lab4.py`: `Recording`, the Lab4 key, its details, a new subject's fields, and the sidecar; `from_sidecar` and
+  `from_lab4` fill one back from a sidecar or Lab4 rows.
+- `database.py`: `Credentials`, `Lab4Database` (sign-in, `schema`, `register`, `recordings`, `contents`, `update`,
+  `add`) and `Schema`, the tables as they are now.
 - `processing.py`: `list_units` reads a `.mesc`'s units with h5py, `sbatch_command` builds one job per unit running
   `pml_utilities/hpc/asap7/run_asap7.sh`, and `submit` checks the files landed whole first. Jobs are kept in
   `jobs.json`.
@@ -58,6 +59,20 @@ Recording key is hardcoded, so both the dev fixtures' and `lab4.tables`' subject
 
 `register` inserts ExptGroup, Subject and Session when their key is missing (checked first, since NOT NULL fires
 before `ON CONFLICT`), then Recording, in one transaction. `data_path` must be under `/biohpc`.
+
+`contents` reads every row of the tables in `TABLES` (ExptGroup, Subject, Session, Recording, and Injection where the
+server has it) in one `REPEATABLE READ` snapshot, so every recording's session and subject are there. The Lab4
+recordings page joins them by key (`Schema.key`), and Browse marks files whose path is a recording's `data_path`.
+`update` changes columns outside the key (`Schema.details`) on existing rows, every edit in one transaction; empty
+text is NULL where the column allows it. It refuses key columns: other tables point at them, and `lab4_user` cannot
+delete a row to add it again. `add` inserts one row (an Injection).
+
+Edits are kept as text per table and column (`edits_lab4`) and compared with the rows read (`changes_lab4`). A
+reload (`follow_lab4`) moves columns still as read to their new values, so Save never puts back what someone else
+changed; after a save every column takes the saved value, which Postgres may have normalized (`24.5` -> `24.50`).
+Save rewrites the sidecar beside `data_path`, when there is one and the path is not being changed, once the
+database transaction has landed: `{**sidecar, **Recording.sidecar()}`, with the old sidecar's `extra`, so `extra`
+and `source` stay.
 
 ## Catalog
 

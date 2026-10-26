@@ -26,7 +26,7 @@ from imgui_lab4_interface.config import BACKENDS, REACHES, Settings, data_dir, t
 from imgui_lab4_interface.database import BIOHPC, Credentials, Lab4Database, Schema, secrets_path
 from imgui_lab4_interface.processing import Asap7Params, Job, MescUnit
 from imgui_lab4_interface.slices import ADMIN, COLUMNS, PEOPLE, ROOT, SliceDatabase, can_edit, file_dates, locked, match_files
-from imgui_lab4_interface.storage import SIDECAR_SUFFIX, Entry, Mount, SshStorage, Transfer, destination_state, download, find_mounts, open_machine, open_storage, write_text
+from imgui_lab4_interface.storage import SIDECAR_SUFFIX, Entry, Mount, SshStorage, Storage, Transfer, destination_state, download, find_mounts, open_machine, open_storage, write_text
 
 ACCENT = imgui.ImVec4(0.40, 0.68, 1.00, 1.0)
 KEY = imgui.ImVec4(1.00, 0.80, 0.20, 1.0)
@@ -74,6 +74,7 @@ PAGES = (
     ("home", fa.ICON_FA_HOUSE, "Overview", "what this does and where data goes"),
     ("transfer", fa.ICON_FA_CLOUD_ARROW_UP, "Transfer", "copy data to BioHPC with its metadata"),
     ("browse", fa.ICON_FA_SITEMAP, "Browse storage", "browse BioHPC, open datasets, add metadata"),
+    ("recordings", fa.ICON_FA_DATABASE, "Lab4 recordings", "the recordings in Lab4: edit their details and find their data"),
     ("results", fa.ICON_FA_CHART_LINE, "Results", "each recording's units, with the runs and results on every machine"),
     ("slices", fa.ICON_FA_TABLE, "Human slices", "track human slices from collection to assay (demo data)"),
     ("settings", fa.ICON_FA_GEAR, "Settings", "connection, destinations, viewers and processing"),
@@ -162,6 +163,11 @@ def measure(sources: list[Path]) -> list[tuple[Path, int]]:
     return [(s, sum(f.stat().st_size for f in s.rglob("*") if f.is_file()) if s.is_dir() else s.stat().st_size) for s in sources]
 
 
+def read_sidecar(storage: Storage, path: str) -> Optional[dict]:
+    """The sidecar json at path, or None when there is none."""
+    return json.loads(storage.read_text(path)) if storage.exists(path) else None
+
+
 def is_recording_data(path: str) -> bool:
     """Whether path is an .h5, the file lab4.convert writes and Lab4 registers."""
     return path.lower().endswith((".h5", ".hdf5"))
@@ -228,6 +234,22 @@ class Lab4App:
         self.db: Optional[Lab4Database] = None
         self.schema: Optional[Schema] = None
         self.subject_recordings: list[dict] = []
+        # Lab4 recordings: every row of the tables the window edits, by table, and the recording at each data path
+        self.lab4: dict[str, list[dict]] = {}
+        self.registered: dict[str, dict] = {}
+        self.filter_lab4 = ""
+        # the picked recording's rows (recording, session, subject), their columns as edited, and a new injection's
+        self.picked_lab4: Optional[dict[str, dict]] = None
+        self.edits_lab4: dict[str, dict[str, str]] = {}
+        self.injection: dict[str, str] = {}
+        # whether the next reload follows a save, which takes every saved value into the edits
+        self.saved_lab4 = False
+        # the sidecar beside the picked recording's data: its json, None when there is none, and why it cannot be read
+        self.sidecar_lab4: Optional[dict] = None
+        self.error_sidecar_lab4 = ""
+        self.rewrite_sidecar = True
+        # the sidecar to rewrite once a save lands: path and text
+        self.sidecar_pending: Optional[tuple[str, str]] = None
         # local mounts of mount_base; None until detected
         self.mounts: Optional[list[Mount]] = None
         # whether the first mount detection has run; only it falls back to ssh
@@ -389,6 +411,7 @@ class Lab4App:
         self.user = ""
         self.db = None
         self.schema = None
+        self.lab4, self.registered, self.picked_lab4 = {}, {}, None
         self.page = "home"
         self.message = ""
 
@@ -418,6 +441,121 @@ class Lab4App:
         self.subject_recordings = []
         if self.db is not None and self.schema is not None and subject in self.schema.subjects:
             self.submit("subject", self.db.recordings, subject)
+
+    def load_lab4(self) -> None:
+        """Read the recordings, sessions, subjects and injections from Lab4."""
+        if self.db is not None and self.schema is not None:
+            self.submit("lab4_rows", self.db.contents, self.schema)
+
+    def rows_lab4(self, recording: dict) -> dict[str, dict]:
+        """The recording row with its session's and its subject's, by table."""
+        rows = {"recording": recording}
+        for table in ("session", "subject"):
+            key = self.schema.key(table, recording)
+            rows[table] = next(row for row in self.lab4[table] if self.schema.key(table, row) == key)
+        return rows
+
+    def pick_lab4(self, recording: dict) -> None:
+        """Pick a recording to edit, and look for the sidecar beside its data. Picking it again keeps its edits."""
+        if self.picked_lab4 is not None and self.schema.key("recording", self.picked_lab4["recording"]) == self.schema.key("recording", recording):
+            return
+        self.picked_lab4 = self.rows_lab4(recording)
+        self.edits_lab4 = {table: {c.name: lab4.text_of(row[c.name]) for c in self.schema.details(table)} for table, row in self.picked_lab4.items()}
+        self.injection = {}
+        self.sidecar_lab4, self.error_sidecar_lab4 = None, ""
+        self.submit("lab4_sidecar", read_sidecar, self.storage, f"{recording['data_path']}{SIDECAR_SUFFIX}")
+
+    def follow_lab4(self) -> None:
+        """
+        Follow the picked recording to its reloaded rows. Columns left as they were take the new values, so a save
+        never puts back what someone else changed; after a save, every column does.
+        """
+        if self.picked_lab4 is None:
+            return
+        key = self.schema.key("recording", self.picked_lab4["recording"])
+        recording = next((row for row in self.lab4["recording"] if self.schema.key("recording", row) == key), None)
+        if recording is None:
+            self.picked_lab4 = None
+            return
+        rows = self.rows_lab4(recording)
+        for table, fields in self.edits_lab4.items():
+            for name, text in fields.items():
+                if self.saved_lab4 or text.strip() == lab4.text_of(self.picked_lab4[table][name]).strip():
+                    fields[name] = lab4.text_of(rows[table][name])
+        self.picked_lab4 = rows
+
+    def changes_lab4(self) -> list[tuple[str, dict, dict]]:
+        """(table, key, column -> text) for each of the picked recording's rows the edits change."""
+        found = []
+        for table, row in (self.picked_lab4 or {}).items():
+            changed = {name: text for name, text in self.edits_lab4[table].items() if text.strip() != lab4.text_of(row[name]).strip()}
+            if changed:
+                found.append((table, self.schema.key(table, row), changed))
+        return found
+
+    def recording_lab4(self) -> lab4.Recording:
+        """The picked recording as edited, as the metadata form holds one."""
+        edits = self.edits_lab4
+        notes = edits["session"].get("session_notes", "")
+        return lab4.Recording.from_lab4({**self.picked_lab4["recording"], **edits["recording"]}, notes, edits["subject"])
+
+    def moves_data(self) -> bool:
+        """Whether the edits change the picked recording's data path."""
+        return self.edits_lab4["recording"].get("data_path", "").strip() != self.picked_lab4["recording"]["data_path"]
+
+    def sidecar_rewrite(self) -> Optional[tuple[str, str]]:
+        """
+        Path and new text of the picked recording's sidecar, when a save rewrites it: it keeps the sidecar's other
+        fields, such as extra and source, and takes the edited ones. None when there is no sidecar, the data path
+        changes, or rewriting is off.
+        """
+        if self.sidecar_lab4 is None or not self.rewrite_sidecar or self.moves_data():
+            return None
+        rec = self.recording_lab4()
+        rec.extra = [[k, str(v)] for k, v in self.sidecar_lab4.get("extra", {}).items()]
+        text = json.dumps({**self.sidecar_lab4, **rec.sidecar(user=self.user)}, indent=2)
+        return f"{self.picked_lab4['recording']['data_path']}{SIDECAR_SUFFIX}", text
+
+    def save_lab4(self, changes: list[tuple[str, dict, dict]], sidecar: Optional[tuple[str, str]]) -> None:
+        """Save the changes to Lab4; poll rewrites the sidecar once they land."""
+        self.sidecar_pending = sidecar
+        self.submit("lab4_save", self.db.update, self.schema, changes)
+
+    def injection_problems(self, subject: str) -> list[str]:
+        """Why the new injection cannot be added to subject yet."""
+        if "lab4_add" in self.futures:
+            return ["adding..."]
+        values = {c.name: self.injection.get(c.name, "") for c in self.schema.tables["injection"] if c.name != "subject_id"}
+        found = self.schema.edit_problems("injection", values)
+        key = self.schema.key("injection", {**{k: v.strip() for k, v in values.items()}, "subject_id": subject})
+        if any({k: lab4.text_of(v) for k, v in self.schema.key("injection", row).items()} == key for row in self.lab4.get("injection", [])):
+            found.append(f"{subject} already has that injection")
+        return found
+
+    def confirm_injection(self, subject: str) -> None:
+        values = {"subject_id": subject, **self.injection}
+        lines = [f"add to Lab4's injections ({self.db.credentials.label()}):", "  " + ", ".join(f"{k.replace('_', ' ')} {v.strip()}" for k, v in values.items() if v.strip())]
+        self.confirm = {"title": "Add to Lab4?", "lines": lines, "button": "Add", "run": self.submit, "args": ("lab4_add", self.db.add, self.schema, "injection", values)}
+
+    def show_in_browse(self, path: str) -> None:
+        """List path's folder in Browse storage, with path selected."""
+        self.browse(path=posixpath.dirname(path))
+        self.selected = posixpath.basename(path)
+        self.page = "browse"
+
+    def show_in_lab4(self, path: str) -> None:
+        """Pick the recording registered at path on the Lab4 recordings page."""
+        self.pick_lab4(self.registered[path])
+        self.page = "recordings"
+
+    def load_sidecar(self) -> None:
+        """Fill the metadata form from the selected item's sidecar."""
+        try:
+            self.recording = lab4.Recording.from_sidecar(json.loads(self.sidecar))
+        except (ValueError, AttributeError) as e:
+            self.message, self.failed = f"cannot read {self.selected}{SIDECAR_SUFFIX}: {e}", True
+            return
+        self.message, self.failed = f"the metadata form holds {self.recording.label()}, from {self.selected}{SIDECAR_SUFFIX}", False
 
     def quit(self) -> None:
         if self.transfer is not None:
@@ -826,12 +964,48 @@ class Lab4App:
                     self.schema = future.result()
                     self.user = self.schema.user
                     self.connect()
+                    self.load_lab4()
                 else:
                     self.db = None
                     self.error_login = f"sign-in failed: {error}"
             elif name == "refresh" and error is None:
                 self.schema = future.result()
                 self.look_up_subject()
+                self.load_lab4()
+            elif name == "lab4_rows":
+                if error is None:
+                    self.lab4 = future.result()
+                    self.registered = {row["data_path"]: row for row in self.lab4["recording"]}
+                    self.follow_lab4()
+                else:
+                    self.message, self.failed = f"cannot read Lab4: {error}", True
+                self.saved_lab4 = False
+            elif name == "lab4_sidecar":
+                self.sidecar_lab4 = None if error is not None else future.result()
+                self.error_sidecar_lab4 = "" if error is None else str(error)
+            elif name == "lab4_save":
+                self.failed = error is not None
+                if error is None:
+                    self.message = "saved to Lab4"
+                    if self.sidecar_pending is not None:
+                        self.message += f"; rewriting {posixpath.basename(self.sidecar_pending[0])}"
+                        self.submit("lab4_rewrite", write_text, self.storage, *self.sidecar_pending)
+                    self.saved_lab4 = True
+                    self.load_lab4()
+                else:
+                    self.message = f"saving failed: {error}"
+                self.sidecar_pending = None
+            elif name == "lab4_rewrite":
+                self.failed = error is not None
+                self.message = "saved to Lab4 and rewrote the sidecar" if error is None else f"saved to Lab4, but rewriting the sidecar failed: {error}"
+                if self.picked_lab4 is not None:
+                    self.submit("lab4_sidecar", read_sidecar, self.storage, f"{self.picked_lab4['recording']['data_path']}{SIDECAR_SUFFIX}")
+            elif name == "lab4_add":
+                self.failed = error is not None
+                self.message = "added the injection to Lab4" if error is None else f"adding failed: {error}"
+                if error is None:
+                    self.injection = {}
+                    self.load_lab4()
             elif name == "subject":
                 self.subject_recordings = [] if error is not None else future.result()
             elif name == "register":
@@ -1055,6 +1229,19 @@ class Lab4App:
             elif self.selected.endswith(SIDECAR_SUFFIX):
                 found.append("that is already a sidecar")
             found += self.recording.problems()
+        elif self.page == "recordings":
+            if self.schema is None:
+                found.append("sign in to Lab4 to edit its recordings")
+            elif self.picked_lab4 is None:
+                found.append("pick a recording")
+            else:
+                if "lab4_save" in self.futures:
+                    found.append("saving...")
+                changes = self.changes_lab4()
+                if not changes:
+                    found.append("nothing changed")
+                for table, _, values in changes:
+                    found += self.schema.edit_problems(table, values)
         return found
 
     def process_problems(self) -> list[str]:
@@ -1079,6 +1266,8 @@ class Lab4App:
             return label + (f", process {len(self.chosen)} unit{'' if len(self.chosen) == 1 else 's'}" if self.process else "")
         if self.page == "browse":
             return f"{fa.ICON_FA_TAGS}  Attach metadata"
+        if self.page == "recordings":
+            return f"{fa.ICON_FA_FLOPPY_DISK}  Save to Lab4"
         if self.page == "settings":
             return f"{fa.ICON_FA_FLOPPY_DISK}  Save"
         if self.page == "slices":
@@ -1118,6 +1307,19 @@ class Lab4App:
             if f"{self.selected}{SIDECAR_SUFFIX}" in {e.name for e in self.entries}:
                 lines.append("The existing sidecar is replaced.")
             self.confirm = {"title": "Attach metadata?", "lines": lines, "button": "Write", "run": self.submit, "args": ("attach", write_text, self.storage, path, text)}
+        elif self.page == "recordings":
+            changes = self.changes_lab4()
+            lines = [f"change in Lab4 ({self.db.credentials.label()}):"]
+            for table, _, values in changes:
+                row = self.picked_lab4[table]
+                lines += [f"  {table} {name.replace('_', ' ')}: {lab4.text_of(row[name])!r} -> {text.strip()!r}" for name, text in values.items()]
+            shared = [table for table, _, _ in changes if table != "recording"]
+            if shared:
+                lines.append(f"Every recording of this {' and '.join(shared)} shows the change.")
+            sidecar = self.sidecar_rewrite()
+            if sidecar is not None:
+                lines.append(f"then rewrite {sidecar[0]} on {self.storage.label}")
+            self.confirm = {"title": "Save to Lab4?", "lines": lines, "button": "Save", "run": self.save_lab4, "args": (changes, sidecar)}
         elif self.page == "settings":
             self.settings.save()
             self.connect()
@@ -1300,6 +1502,8 @@ class Lab4App:
             self.draw_transfer()
         elif key == "browse":
             self.draw_browse()
+        elif key == "recordings":
+            self.draw_lab4()
         elif key == "results":
             self.draw_results()
         elif key == "slices":
@@ -1371,7 +1575,7 @@ class Lab4App:
     def draw_home(self) -> None:
         """Page cards, links, destinations and the files a transfer writes."""
         em = imgui.get_font_size()
-        pages = [page for page in PAGES if page[0] in ("transfer", "browse", "results", "slices")]
+        pages = [page for page in PAGES if page[0] in ("transfer", "browse", "recordings", "results", "slices")]
         i = draw_cards([(icon, name, hint) for key, icon, name, hint in pages])
         if i is not None:
             self.page = pages[i][0]
@@ -1781,7 +1985,7 @@ class Lab4App:
             imgui.table_setup_column("kind", imgui.TableColumnFlags_.width_fixed, 8 * em)
             imgui.table_setup_column("holds", imgui.TableColumnFlags_.width_stretch, 1.5)
             imgui.table_setup_column("size", imgui.TableColumnFlags_.width_fixed, 5 * em)
-            imgui.table_setup_column("##tag", imgui.TableColumnFlags_.width_fixed, 1.5 * em)
+            imgui.table_setup_column("##tag", imgui.TableColumnFlags_.width_fixed, 3 * em)
             imgui.table_headers_row()
             for entry in self.entries:
                 item = items.get(entry.name, {})
@@ -1815,8 +2019,17 @@ class Lab4App:
                 size = item.get("size", 0 if entry.is_dir else entry.size)
                 imgui.text_disabled(human_bytes(size) if size else "")
                 imgui.table_next_column()
+                registered = self.registered.get(f"{self.path_browse.rstrip('/')}/{entry.name}")
                 if f"{entry.name}{SIDECAR_SUFFIX}" in names:
                     imgui.text_colored(OK, fa.ICON_FA_TAGS)
+                    if imgui.is_item_hovered():
+                        idl.wrapped_tooltip("has a sidecar")
+                    if registered is not None:
+                        imgui.same_line()
+                if registered is not None:
+                    imgui.text_colored(ACCENT, fa.ICON_FA_DATABASE)
+                    if imgui.is_item_hovered():
+                        idl.wrapped_tooltip(f"in Lab4: {registered['subject_id']}, {lab4.text_of(registered['session_datetime'])}, {registered['device_name']}")
             imgui.end_table()
         imgui.text_disabled("double-click to open a folder or dataset")
 
@@ -1824,7 +2037,13 @@ class Lab4App:
             item = items.get(self.selected, {})
             imgui.text_colored(ACCENT, f"{fa.ICON_FA_TAGS}  {self.selected}")
             path = f"{self.path_browse.rstrip('/')}/{self.selected}"
-            if is_recording_data(path) and not any(e.is_dir for e in self.entries if e.name == self.selected):
+            if path in self.registered:
+                imgui.same_line()
+                if imgui.small_button(f"{fa.ICON_FA_DATABASE}  Show in Lab4"):
+                    self.show_in_lab4(path)
+                if imgui.is_item_hovered():
+                    idl.wrapped_tooltip("this file is a Lab4 recording's data; edit its details on Lab4 recordings")
+            elif is_recording_data(path) and not any(e.is_dir for e in self.entries if e.name == self.selected):
                 blockers = self.register_problems(path)
                 imgui.same_line()
                 imgui.begin_disabled(bool(blockers))
@@ -1843,6 +2062,10 @@ class Lab4App:
             if "sidecar" in self.futures:
                 imgui.text_disabled("reading metadata...")
             elif self.sidecar:
+                if imgui.small_button(f"{fa.ICON_FA_PEN_TO_SQUARE}  Load into the form"):
+                    self.load_sidecar()
+                if imgui.is_item_hovered():
+                    idl.wrapped_tooltip("fill the metadata form below from this sidecar, e.g. to register the recording or attach it elsewhere")
                 imgui.push_style_color(imgui.Col_.text, CODE)
                 imgui.input_text_multiline("##sidecar", self.sidecar, imgui.ImVec2(-1, 10 * em), imgui.InputTextFlags_.read_only)
                 imgui.pop_style_color()
@@ -1851,6 +2074,162 @@ class Lab4App:
         imgui.dummy(imgui.ImVec2(0, 0.4 * em))
         if imgui.collapsing_header(f"{fa.ICON_FA_TAGS}  Metadata: {self.recording.label()}###browse_metadata"):
             self.draw_recording()
+
+    def draw_lab4(self) -> None:
+        """Refresh and filter, a row per Lab4 recording, then the picked one's details to edit."""
+        em = imgui.get_font_size()
+        if self.schema is None:
+            draw_wrapped("Offline: sign in to Lab4 to see its recordings and edit their details.", DIM)
+            return
+        loading = "lab4_rows" in self.futures
+        imgui.begin_disabled(loading)
+        if imgui.button(f"{fa.ICON_FA_ARROWS_ROTATE}##refresh_lab4"):
+            self.load_lab4()
+        imgui.end_disabled()
+        if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
+            idl.wrapped_tooltip("read Lab4 again; edits not saved yet are kept")
+        imgui.same_line()
+        imgui.set_next_item_width(-1)
+        _, self.filter_lab4 = imgui.input_text_with_hint("##filter_lab4", "filter by subject, session, device, label, group or data path", self.filter_lab4)
+
+        recordings = self.lab4.get("recording", [])
+        needle = self.filter_lab4.strip().lower()
+        rows = [row for row in recordings if needle in " ".join(lab4.text_of(value) for value in row.values()).lower()]
+        picked = self.schema.key("recording", self.picked_lab4["recording"]) if self.picked_lab4 else None
+        flags = imgui.TableFlags_.row_bg | imgui.TableFlags_.borders_inner_h | imgui.TableFlags_.scroll_y | imgui.TableFlags_.resizable
+        # as tall as its rows, up to 40% of the page, so a short list leaves room for the picked recording
+        height = max(5 * em, min(0.4 * imgui.get_content_region_avail().y, (len(rows) + 1.5) * imgui.get_frame_height()))
+        width_inner = 0.0 if imgui.get_content_region_avail().x >= 40 * em else 40 * em
+        if imgui.begin_table("##lab4", 5, flags | imgui.TableFlags_.scroll_x, imgui.ImVec2(0, height), width_inner):
+            imgui.table_setup_scroll_freeze(0, 1)
+            imgui.table_setup_column("subject", imgui.TableColumnFlags_.width_fixed, 7 * em)
+            imgui.table_setup_column("session", imgui.TableColumnFlags_.width_fixed, 8 * em)
+            imgui.table_setup_column("device", imgui.TableColumnFlags_.width_fixed, 8 * em)
+            imgui.table_setup_column("label", imgui.TableColumnFlags_.width_stretch, 1.0)
+            imgui.table_setup_column("data", imgui.TableColumnFlags_.width_stretch, 2.0)
+            imgui.table_headers_row()
+            clipper = imgui.ListClipper()
+            clipper.begin(len(rows))
+            while clipper.step():
+                for i in range(clipper.display_start, clipper.display_end):
+                    row = rows[i]
+                    imgui.table_next_row()
+                    imgui.table_next_column()
+                    flags_row = imgui.SelectableFlags_.span_all_columns | imgui.SelectableFlags_.allow_double_click
+                    clicked, _ = imgui.selectable(f"{row['subject_id']}##lab4_{i}", self.schema.key("recording", row) == picked, flags_row)
+                    if clicked:
+                        self.pick_lab4(row)
+                    if clicked and imgui.is_mouse_double_clicked(imgui.MouseButton_.left):
+                        self.show_in_browse(row["data_path"])
+                    if imgui.is_item_hovered():
+                        idl.wrapped_tooltip(f"{row['experimenter']} · {row['collection_name']}\ndouble-click to show its data in Browse storage")
+                    imgui.table_next_column()
+                    imgui.text_disabled(lab4.text_of(row["session_datetime"]))
+                    imgui.table_next_column()
+                    imgui.text(row["device_name"])
+                    imgui.table_next_column()
+                    imgui.text(lab4.text_of(row.get("ui_label")))
+                    imgui.table_next_column()
+                    imgui.text_colored(PATH, row["data_path"])
+            imgui.end_table()
+        if recordings:
+            draw_wrapped(f"{len(rows)} of {len(recordings)} recordings", DIM)
+        else:
+            draw_wrapped("reading Lab4..." if loading else "no recordings in Lab4 yet; register one from Browse storage", DIM)
+        if self.picked_lab4 is not None:
+            self.draw_lab4_recording()
+
+    def draw_lab4_recording(self) -> None:
+        """The picked recording's key and data, then its recording, session and subject columns to edit."""
+        row = self.picked_lab4["recording"]
+        rec = self.recording_lab4()
+        imgui.text_colored(ACCENT, f"{fa.ICON_FA_DATABASE}  {rec.label()}")
+        imgui.same_line()
+        imgui.text_disabled(f"{row['experimenter']} · {row['collection_name']}")
+        if imgui.small_button(f"{fa.ICON_FA_SITEMAP}  Show in Browse"):
+            self.show_in_browse(row["data_path"])
+        if imgui.is_item_hovered():
+            idl.wrapped_tooltip(f"list {posixpath.dirname(row['data_path'])} in Browse storage")
+        kind = classify_file(posixpath.basename(row["data_path"]))
+        if kind is not None:
+            imgui.same_line()
+            if imgui.small_button(f"{fa.ICON_FA_EYE}  Open in {KINDS[kind][0]}"):
+                self.open_dataset(path=row["data_path"], kind=kind)
+        imgui.same_line()
+        if imgui.small_button(f"{fa.ICON_FA_PEN_TO_SQUARE}  Use in the metadata form"):
+            self.recording = rec
+            self.message, self.failed = f"the metadata form holds {rec.label()}", False
+        if imgui.is_item_hovered():
+            idl.wrapped_tooltip("fill the metadata form on Transfer and Browse storage from this recording, e.g. to send or register more data of its session")
+        with imgui_ctx.begin_child("##lab4_recording"):
+            sections = (
+                ("recording", "Recording", "this recording's columns; its key (experimenter, group, subject, session, device) cannot change here"),
+                ("session", "Session", "shared by every recording of this session"),
+                ("subject", f"Subject {row['subject_id']}", "shared by every session of this subject"),
+            )
+            for table, title, hint in sections:
+                if self.schema.details(table):
+                    self.subsection(title, hint)
+                    self.draw_fields(table)
+            self.draw_sidecar_lab4()
+            if "injection" in self.schema.tables:
+                self.draw_injections()
+
+    def draw_fields(self, table: str) -> None:
+        """A form row per column of the picked recording's table outside its key; a changed one's caption ends in *."""
+        row, fields = self.picked_lab4[table], self.edits_lab4[table]
+        if not self.begin_form(f"lab4_{table}"):
+            return
+        for column in self.schema.details(table):
+            name = column.name
+            changed = fields[name].strip() != lab4.text_of(row[name]).strip()
+            self.row(name.replace("_", " ") + (" *" if changed else ""))
+            if name.endswith("notes"):
+                _, fields[name] = imgui.input_text_multiline(f"##lab4_{table}_{name}", fields[name], imgui.ImVec2(-1, 3.5 * imgui.get_font_size()))
+            else:
+                fields[name] = self.pick(f"##lab4_{table}_{name}", fields[name], self.schema.choices.get(name, []), "YYYY-MM-DD" if column.type == "date" else "")
+        imgui.end_table()
+
+    def draw_sidecar_lab4(self) -> None:
+        """Whether the picked recording's data has a sidecar, and whether Save rewrites it."""
+        name = posixpath.basename(self.picked_lab4["recording"]["data_path"]) + SIDECAR_SUFFIX
+        imgui.dummy(imgui.ImVec2(0, 0.3 * imgui.get_font_size()))
+        if "lab4_sidecar" in self.futures:
+            imgui.text_disabled(f"looking for {name}...")
+        elif self.error_sidecar_lab4:
+            draw_wrapped(f"cannot read {name}: {self.error_sidecar_lab4}", WARN)
+        elif self.sidecar_lab4 is None:
+            draw_wrapped(f"no {name} beside the data; Attach metadata in Browse storage writes one", DIM)
+        elif self.moves_data():
+            draw_wrapped(f"the data path changes, so {name} is left as it is", DIM)
+        else:
+            _, self.rewrite_sidecar = imgui.checkbox(f"Save also rewrites {name}", self.rewrite_sidecar)
+            if imgui.is_item_hovered():
+                idl.wrapped_tooltip("the label, weight, notes and subject columns take the saved values; extra fields and the source stay")
+
+    def draw_injections(self) -> None:
+        """The subject's injections, and a form to add one."""
+        subject = self.picked_lab4["subject"]["subject_id"]
+        self.subsection("Injections", f"the indicators injected into {subject}; adding one asks first")
+        columns = [c for c in self.schema.tables["injection"] if c.name != "subject_id"]
+        injections = [row for row in self.lab4.get("injection", []) if row["subject_id"] == subject]
+        for row in injections:
+            imgui.text(" · ".join(text for text in (lab4.text_of(row[c.name]) for c in columns) if text))
+        if not injections:
+            imgui.text_disabled("none in Lab4")
+        if self.begin_form("lab4_injection"):
+            for column in columns:
+                self.row(column.name.replace("_", " ") + ("" if column.key or column.required else " (optional)"))
+                value = self.injection.get(column.name, "")
+                self.injection[column.name] = self.pick(f"##injection_{column.name}", value, self.schema.choices.get(column.name, []), "YYYY-MM-DD" if column.type == "date" else "")
+            imgui.end_table()
+        blockers = self.injection_problems(subject)
+        imgui.begin_disabled(bool(blockers))
+        if imgui.button(f"{fa.ICON_FA_PLUS}  Add injection"):
+            self.confirm_injection(subject)
+        imgui.end_disabled()
+        if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
+            idl.wrapped_tooltip("\n".join(blockers) if blockers else f"add this injection of {subject} to Lab4")
 
     def draw_results(self) -> None:
         """Scan and filter, each machine's last scan, a row per recording and unit, then the picked row's details."""
