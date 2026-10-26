@@ -1,11 +1,15 @@
 import json
+import os
 import shutil
+import sys
+import time
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 
 from imgui_lab4_interface import SIDECAR_SUFFIX, MountedStorage, Recording, Settings, Transfer, open_storage, SshStorage
-from imgui_lab4_interface.storage import SshReader, destination_state, download, shows
+from imgui_lab4_interface.storage import SshReader, destination_state, download, options_shared, shows
 
 
 def test_transfer_copies_files_and_folders_with_sidecars(tmp_path):
@@ -180,3 +184,81 @@ def test_an_unset_mount_root_reaches_nothing():
     for call in (storage.check, lambda: storage.listdir("/biohpc"), lambda: destination_state(storage, "/biohpc/data2")):
         with pytest.raises(OSError, match="no mount root set"):
             call()
+
+
+def ssh_stand_in(tmp_path) -> tuple[SshStorage, Path]:
+    """An SshStorage whose commands run here through sh, each logged to the returned file."""
+    calls = tmp_path / "calls.log"
+    storage = SshStorage("unused")
+    storage.base = ["sh", "-c", f'printf "%s\\n" "$0" >> {calls}; eval "$0"']
+    return storage, calls
+
+
+@pytest.mark.skipif(shutil.which("sh") is None or shutil.which("tar") is None, reason="needs sh and tar to stand in for ssh")
+def test_transfer_over_ssh_is_one_tar_and_keeps_folder_permissions(tmp_path):
+    local = tmp_path / "local"
+    (local / "session" / "plane0").mkdir(parents=True)
+    (local / "session" / "plane0" / "data.bin").write_bytes(b"x" * 3_000_000)
+    (local / "session" / "notes.txt").write_text("n")
+    (local / "movie 5µm.tif").write_bytes(b"tif")
+    dest = tmp_path / "remote" / "raw"
+    (dest / "session").mkdir(parents=True)
+    # a shared lab folder: group-writable, and new files take its group
+    for folder in (dest, dest / "session"):
+        folder.chmod(0o2775)
+    storage, calls = ssh_stand_in(tmp_path)
+    started = time.time()
+
+    transfer = Transfer(storage, [local / "session", local / "movie 5µm.tif"], str(dest), {"recording": "r"}, overwrite=True)
+    transfer.run()
+
+    assert (dest / "session" / "plane0" / "data.bin").read_bytes() == b"x" * 3_000_000
+    assert (dest / "session" / "notes.txt").read_text() == "n" and (dest / "movie 5µm.tif").read_bytes() == b"tif"
+    assert json.loads((dest / f"session{SIDECAR_SUFFIX}").read_text())["source"] == str(local / "session")
+    assert transfer.done == transfer.total == 3_000_004
+    assert [oct(folder.stat().st_mode & 0o7777) for folder in (dest, dest / "session")] == [oct(0o2775)] * 2
+    assert (dest / "movie 5µm.tif").stat().st_mtime >= started - 1
+    commands = calls.read_text().splitlines()
+    assert len(commands) == 2 and sum("tar -xmf" in c for c in commands) == 1
+
+
+@pytest.mark.skipif(shutil.which("sh") is None or shutil.which("tar") is None, reason="needs sh and tar to stand in for ssh")
+def test_transfer_over_ssh_checks_names_in_one_listing(tmp_path):
+    sources = [tmp_path / f"{name}.tif" for name in "abc"]
+    for source in sources:
+        source.write_text("x")
+    (tmp_path / "remote").mkdir()
+    storage, calls = ssh_stand_in(tmp_path)
+    Transfer(storage, sources, str(tmp_path / "remote"), {"recording": "r"}, overwrite=False).run()
+    assert len(calls.read_text().splitlines()) == 4
+    with pytest.raises(FileExistsError, match="b.tif already exists"):
+        Transfer(storage, [sources[1]], str(tmp_path / "remote"), None, overwrite=False).run()
+
+
+@pytest.mark.skipif(shutil.which("sh") is None or shutil.which("tar") is None, reason="needs sh and tar to stand in for ssh")
+def test_transfer_over_ssh_reports_cancel_and_remote_errors(tmp_path):
+    source = tmp_path / "big.bin"
+    source.write_bytes(b"x" * (3 << 20))
+    (tmp_path / "remote").mkdir()
+    storage, _ = ssh_stand_in(tmp_path)
+    transfer = Transfer(storage, [source], str(tmp_path / "remote"), None, overwrite=True)
+    transfer.cancelled = True
+    with pytest.raises(InterruptedError, match="cancelled"):
+        transfer.run()
+    # the remote side quits without reading, as tar does when it cannot write; its words beat the broken pipe
+    failing = 'echo "** WARNING: connection is not using a post-quantum key exchange algorithm." >&2; echo "raw: Permission denied" >&2; exit 2'
+    storage.base = ["sh", "-c", f'case "$0" in *tar*) {failing};; *) eval "$0";; esac']
+    with pytest.raises(OSError, match="^raw: Permission denied$"):
+        Transfer(storage, [source], str(tmp_path / "remote"), None, overwrite=True).run()
+
+
+def test_ssh_shares_a_connection_only_where_the_socket_fits(monkeypatch):
+    monkeypatch.setattr("imgui_lab4_interface.storage.os.path.isdir", lambda path: True)
+    monkeypatch.setattr(Path, "home", lambda: Path("/home/fo"))
+    options = options_shared()
+    assert "ControlPath=/home/fo/.ssh/lab4-%C" in options and options == SshStorage("biohpc").base[-1 - len(options) : -1]
+    monkeypatch.setattr(Path, "home", lambda: Path("/home/" + "x" * 40))
+    assert options_shared() == []
+    monkeypatch.setattr(Path, "home", lambda: Path("/home/fo"))
+    monkeypatch.setattr(sys, "platform", "win32")
+    assert options_shared() == []

@@ -188,13 +188,13 @@ def match_unit(paths: list[str], recordings: list[str], by_folder: dict[str, str
     """
     The (recording, unit) paths refer to, "" where unknown.
 
-    The recording is the longest of recordings named in the paths, else the one whose .mesc sits in a folder above
-    them (by_folder), else the only one starting with a file name's part before _MUnit. The unit is the last
-    MSession_N_MUnit_N named; a bare MUnit_N is the recording's only known unit of that number, else MSession_0's.
+    The recording is the first of recordings, longest first, named in the paths, else the one whose .mesc sits in a
+    folder above them (by_folder), else the only one starting with a file name's part before _MUnit. The unit is the
+    last MSession_N_MUnit_N named; a bare MUnit_N is the recording's only known unit of that number, else MSession_0's.
     """
     paths = [p.replace("\\", "/") for p in paths if p]
     text = " ".join(paths)
-    recording = next((r for r in sorted(recordings, key=len, reverse=True) if r in text), "")
+    recording = next((r for r in recordings if r in text), "")
     if not recording:
         recording = next((by_folder[a] for p in paths for a in ancestors(p) if by_folder.get(a)), "")
     if not recording:
@@ -308,10 +308,11 @@ class Catalog:
                 units += read.get((path, mtime)) or read_units(storage, path, mtime)
 
         metadata = []
+        texts = storage.read_texts(list(sidecars.values()))
         for target, sidecar in sidecars.items():
             try:
-                body = json.loads(storage.read_text(sidecar))
-            except (OSError, ValueError):
+                body = json.loads(texts.get(sidecar, ""))
+            except ValueError:
                 continue
             if not isinstance(body, dict):
                 continue
@@ -375,7 +376,7 @@ class Catalog:
                     folder = posixpath.dirname(row["path"])
                     # a folder holding two recordings names neither
                     by_folder[folder] = row["recording"] if by_folder.get(folder, row["recording"]) == row["recording"] else ""
-            recordings = sorted(recordings - {""})
+            recordings = sorted(recordings - {""}, key=lambda r: (-len(r), r))
             runs = {}
             for row in db.execute("SELECT storage, path, input FROM runs").fetchall():
                 recording, unit = match_unit([row["input"], row["path"]], recordings, by_folder, known)

@@ -63,6 +63,7 @@ def test_every_page_renders(tmp_path, monkeypatch):
     except Exception as e:
         pytest.skip(f"null backend unavailable: {e}")
     app.executor.shutdown(wait=True)
+    app.executor_long.shutdown(wait=True)
 
     assert app.user == "offline"
     assert driver.pages_seen == [key for key, *_ in PAGES]

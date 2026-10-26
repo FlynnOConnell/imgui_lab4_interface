@@ -215,6 +215,7 @@ def test_results_page_renders_and_opens_in_place(machines, tmp_path, monkeypatch
     except Exception as e:
         pytest.skip(f"null backend unavailable: {e}")
     app.executor.shutdown(wait=True)
+    app.executor_long.shutdown(wait=True)
     assert app.picked_result == (REC, "MSession_0/MUnit_1") and app.page == "results"
 
     launched = []

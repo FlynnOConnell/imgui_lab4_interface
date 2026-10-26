@@ -22,6 +22,7 @@ def app(tmp_path, monkeypatch):
     settle(made)
     yield made
     made.executor.shutdown(wait=True)
+    made.executor_long.shutdown(wait=True)
 
 
 class SavedTo:
@@ -125,3 +126,48 @@ def test_double_clicking_a_cell_edits_it_or_says_why_not(app):
     app.user_slices = "shobhana"
     app.start_edit("slices", row, names.index("region"))
     assert app.editing == ("slices", row["id"], "region") and app.open_choice
+
+
+class TypingDriver:
+    """Outlines a cell of row, types one character to edit it, and the next on the frame its box takes focus."""
+
+    def __init__(self, app: Lab4App, row: dict, column: str):
+        self.app, self.row, self.column, self.frame = app, row, column, 0
+
+    def __call__(self) -> None:
+        from imgui_bundle import hello_imgui, imgui
+
+        self.frame += 1
+        if self.frame == 10:
+            self.app.cell = ("slices", self.row["id"], self.column)
+        # a character added in one frame arrives in the next
+        if self.frame in (11, 12):
+            imgui.get_io().add_input_character(ord("cu"[self.frame - 11]))
+        self.app.dialog.render()
+        if self.frame == 20:
+            hello_imgui.get_runner_params().app_shall_exit = True
+
+
+@pytest.mark.parametrize("column", ["ephys_notes", "incubator"])
+def test_typing_while_the_edit_box_takes_focus_keeps_every_character(app, column):
+    import imgui_data_loader as idl
+    from imgui_bundle import hello_imgui, immapp
+    from test_headless_render import enable_textures
+
+    idl.ensure_assets()
+    row = next(r for r in app.rows_slices["slices"] if r["slice_id"] == "HS260727.B")
+    params = hello_imgui.RunnerParams()
+    params.platform_backend_type = hello_imgui.PlatformBackendType.null
+    params.renderer_backend_type = hello_imgui.RendererBackendType.null
+    params.app_window_params.window_geometry.size = (1040, 720)
+    params.ini_folder_type = hello_imgui.IniFolderType.temp_folder
+    params.ini_filename = "imgui_lab4_interface_typing_test.ini"
+    params.callbacks.post_init = enable_textures
+    params.callbacks.show_gui = TypingDriver(app, row, column)
+    try:
+        immapp.run(params)
+    except Exception as e:
+        pytest.skip(f"null backend unavailable: {e}")
+    assert app.editing == ("slices", row["id"], column)
+    # incubator is a choice, so what is typed filters its list
+    assert (app.filter_choice if column == "incubator" else app.text_edit) == "cu"

@@ -64,6 +64,8 @@ NUMBER_JOBS_SHOWN = 8
 STATES_FAILED = ("FAILED", "CANCELLED", "TIMEOUT", "OUT_OF_MEMORY", "NODE_FAIL", "PREEMPTED")
 # how often Results checks whether another process, e.g. lab4-scan, changed the catalog
 SECONDS_WATCH = 3.0
+# workers that can run for minutes; they get their own threads, so listings and checks never wait behind them
+NAMES_LONG = ("transfer", "process", "scan", "link", "scan_machines", "files_index", "download")
 COLORS_RUN = {"done": OK, "completed": OK, "failed": ERROR, "running": ACCENT}
 NAMES_REACH = {"local": "This computer", "mounted": "Mounted here", "ssh": "SSH"}
 
@@ -114,13 +116,16 @@ def draw_hint(text: str) -> None:
 
 
 def draw_cards(cards: list[tuple[str, str, str]]) -> Optional[int]:
-    """A full-width row of (icon, name, tooltip) cards; returns the index clicked, or None."""
+    """Full-width rows of (icon, name, tooltip) cards, as many to a row as fit their names; returns the index clicked, or None."""
     em = imgui.get_font_size()
     gap = 1.0 * em
-    width = (imgui.get_content_region_avail().x - gap * (len(cards) - 1)) / len(cards)
+    avail = imgui.get_content_region_avail().x
+    width_name = max(imgui.calc_text_size(f"{icon}  {name}").x for icon, name, _ in cards) + 2 * em
+    per_row = min(len(cards), max(1, int((avail + gap) // (width_name + gap))))
+    width = (avail - gap * (per_row - 1)) / per_row
     clicked = None
     for i, (icon, name, tooltip) in enumerate(cards):
-        if i:
+        if i % per_row:
             imgui.same_line(0, gap)
         if idl.icon_button(icon, name, imgui.ImVec2(width, 3.2 * em), theme=THEME, tooltip=tooltip):
             clicked = i
@@ -178,6 +183,37 @@ def human_bytes(n: int) -> str:
             return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
         size /= 1024
     return ""
+
+
+def caret_at(text: str, x: float) -> int:
+    """The utf-8 offset of the caret x pixels into text, where a click there would put it."""
+    n = 0
+    while n < len(text) and imgui.calc_text_size(text[: n + 1]).x - imgui.calc_text_size(text[n]).x / 2 < x:
+        n += 1
+    return len(text[:n].encode())
+
+
+def columns_shown(count: int) -> list[int]:
+    """The current table's columns left to right as shown, hidden ones left out; the first never moves."""
+    table = imgui.internal.get_current_table()
+    rest = [c for c in range(1, count) if imgui.table_get_column_flags(c) & imgui.TableColumnFlags_.is_enabled]
+    return [0, *sorted(rest, key=lambda c: imgui.internal.table_get_cell_bg_rect(table, c).min.x)]
+
+
+def rect_cell(column: int) -> imgui.internal.ImRect:
+    """The current row's cell in column, on screen; rows are one line high."""
+    rect = imgui.internal.table_get_cell_bg_rect(imgui.internal.get_current_table(), column)
+    height = imgui.get_text_line_height() + 2 * imgui.get_style().cell_padding.y
+    return imgui.internal.ImRect(rect.min.x, rect.min.y, rect.max.x, rect.min.y + height)
+
+
+def scroll_to_cell(column: int) -> None:
+    """Scroll the current table, not the page, until the current row's cell in column shows clear of the frozen header and first column."""
+    cell = rect_cell(column)
+    first = rect_cell(0).get_width() if column else 0.0
+    rect = imgui.internal.ImRect(cell.min.x - first, cell.min.y - cell.get_height(), cell.max.x, cell.max.y)
+    flags = imgui.internal.ScrollFlags_.keep_visible_edge_x | imgui.internal.ScrollFlags_.keep_visible_edge_y | imgui.internal.ScrollFlags_.no_scroll_parent
+    imgui.internal.scroll_to_rect(imgui.internal.get_current_window(), rect, flags)
 
 
 class Lab4App:
@@ -261,11 +297,26 @@ class Lab4App:
         self.order_slices: dict[str, list[dict]] = {table: [] for table in COLUMNS}
         self.picked: dict[str, set[int]] = {table: set() for table in COLUMNS}
         self.anchor: dict[str, Optional[int]] = {table: None for table in COLUMNS}
-        # cell being edited (table, row id, column), its text, and whether to focus it
+        # cell being edited (table, row id, column), its text before and now, and whether to focus it
         self.editing: Optional[tuple[str, int, str]] = None
+        self.text_before = ""
         self.text_edit = ""
         self.focus_edit = False
         self.open_choice = False
+        # the outlined cell, as editing; keys move it and typing replaces it, as in Excel
+        self.cell: Optional[tuple[str, int, str]] = None
+        # the table's columns as shown, and whether to scroll the outlined cell into view
+        self.shown_slices: list[int] = []
+        self.scroll_cell = False
+        # where the double-click that opened the edit box landed, the caret offset it gives, and what was typed before
+        # the box took focus
+        self.x_click: Optional[float] = None
+        self.caret_edit: Optional[int] = None
+        self.chars_held = ""
+        # a choice cell's list: its filter, the option it highlights, and the cell it drops from
+        self.filter_choice = ""
+        self.pick_choice: Optional[str] = None
+        self.rect_choice = None
         # row to scroll to, e.g. a new or copied one
         self.scroll_slices: Optional[int] = None
         # file index under ROOT, when it was taken, and the last indexing error
@@ -286,6 +337,7 @@ class Lab4App:
         for table in COLUMNS:
             self.order_rows(table=table)
         self.executor = ThreadPoolExecutor(max_workers=3)
+        self.executor_long = ThreadPoolExecutor(max_workers=len(NAMES_LONG))
         self.futures: dict[str, Future] = {}
         self.picker = None
         self.store = idl.JsonPreferenceStore(path=str(data_dir() / "recent.json"))
@@ -374,7 +426,8 @@ class Lab4App:
 
     def submit(self, name: str, fn, *args) -> None:
         """Run fn on a worker; poll handles the result by name."""
-        self.futures[name] = self.executor.submit(fn, *args)
+        executor = self.executor_long if name in NAMES_LONG else self.executor
+        self.futures[name] = executor.submit(fn, *args)
 
     def connect(self) -> None:
         """Rebuild storage from settings, check it, and relist the browse folder."""
@@ -582,8 +635,12 @@ class Lab4App:
         self.cache_files = (key, (files, claimed, heading))
         return files, claimed, heading
 
-    def start_edit(self, table: str, row: dict, column: int) -> None:
-        """Start editing a double-clicked cell, or say in the footer why it cannot be edited."""
+    def start_edit(self, table: str, row: dict, column: int, seed: Optional[str] = None, x_click: Optional[float] = None) -> None:
+        """
+        Edit a cell, or say in the footer why it cannot be edited. seed replaces its text, as typing over a cell in
+        Excel does; otherwise the caret goes where the cell was double-clicked (x_click), or at the end. A choice cell
+        opens its list instead, filtered by seed.
+        """
         name, kind, _ = COLUMNS[table][column]
         if kind == "joined":
             self.message, self.failed = f"{name} comes from the patient; edit it on Patients", True
@@ -592,15 +649,23 @@ class Lab4App:
         elif not can_edit(row["owner"], self.user_slices):
             self.message, self.failed = f"this row is {row['owner']}'s; {locked(row['owner'])}", True
         else:
-            self.editing = (table, row["id"], name)
-            self.text_edit = "" if row[name] is None else str(row[name])
+            self.cell = self.editing = (table, row["id"], name)
+            self.text_before = "" if row[name] is None else str(row[name])
+            self.text_edit = self.text_before if seed is None else seed
             self.focus_edit = True
+            self.x_click = x_click
+            self.chars_held = ""
             self.open_choice = kind in ("choice", "ref")
+            self.filter_choice = seed or ""
+            # Delete highlights (none), typing the first match, and otherwise the value there
+            self.pick_choice = None if seed else self.text_edit
 
     def commit_edit(self, text: str) -> None:
-        """Save the edited cell; errors show in the footer."""
+        """Save the edited cell unless it is unchanged; errors show in the footer."""
         table, id_, column = self.editing
         self.editing = None
+        if text.strip() == self.text_before:
+            return
         try:
             self.slices.update(table, id_, column, text, self.user_slices)
         except ValueError as e:
@@ -608,6 +673,128 @@ class Lab4App:
             return
         self.message, self.failed = f"{column} set to {text.strip() or 'empty'}", False
         self.reload_slices()
+
+    def move_cell(self, table: str, rows: int, columns: int) -> None:
+        """Move the outlined cell by rows and columns as the table shows them, picking its row alone, and scroll to it."""
+        ids = [r["id"] for r in self.order_slices[table]]
+        names = [name for name, _, _ in COLUMNS[table]]
+        if self.cell is None or self.cell[1] not in ids:
+            return
+        shown = self.shown_slices or list(range(len(names)))
+        column = names.index(self.cell[2])
+        at = shown.index(column) if column in shown else 0
+        id_ = ids[min(max(ids.index(self.cell[1]) + rows, 0), len(ids) - 1)]
+        self.cell = (table, id_, names[shown[min(max(at + columns, 0), len(shown) - 1)]])
+        self.picked[table].clear()
+        self.picked[table].add(id_)
+        self.anchor[table] = id_
+        self.scroll_cell = True
+
+    def keys_cell(self, table: str) -> None:
+        """
+        Excel's keys on the outlined cell, unless a widget or popup has them: arrows, Tab and Enter move it (Shift goes
+        back), F2 edits it, Delete or Backspace edits it empty, typing replaces it, and Escape lets it go.
+        """
+        if self.cell is None or self.editing is not None or imgui.is_any_item_active() or imgui.is_popup_open("", imgui.PopupFlags_.any_popup_id):
+            return
+        if not imgui.is_window_focused(imgui.FocusedFlags_.root_and_child_windows):
+            return
+        names = [name for name, _, _ in COLUMNS[table]]
+        row = next((r for r in self.order_slices[table] if r["id"] == self.cell[1]), None)
+        if row is None or names.index(self.cell[2]) not in self.shown_slices:
+            self.cell = None
+            return
+        io = imgui.get_io()
+        back = -1 if io.key_shift else 1
+        moves = {
+            imgui.Key.up_arrow: (-1, 0), imgui.Key.down_arrow: (1, 0), imgui.Key.left_arrow: (0, -1), imgui.Key.right_arrow: (0, 1),
+            imgui.Key.tab: (0, back), imgui.Key.enter: (back, 0), imgui.Key.keypad_enter: (back, 0),
+        }
+        move = next((step for key, step in moves.items() if imgui.is_key_pressed(key)), None)
+        # Ctrl drops typed characters, as imgui's text boxes do, except with Alt for AltGr
+        typed = "" if (io.key_ctrl and not io.key_alt) or io.key_super else "".join(chr(c) for c in io.input_queue_characters if c >= 32 and c != 127)
+        column = names.index(self.cell[2])
+        if imgui.is_key_pressed(imgui.Key.escape):
+            self.cell = None
+        elif move is not None:
+            self.move_cell(table, *move)
+        elif imgui.is_key_pressed(imgui.Key.f2):
+            self.start_edit(table, row, column)
+        elif not io.key_ctrl and (imgui.is_key_pressed(imgui.Key.delete) or imgui.is_key_pressed(imgui.Key.backspace)):
+            self.start_edit(table, row, column, seed="")
+        elif typed:
+            self.start_edit(table, row, column, seed=typed)
+            io.input_queue_characters.clear()
+        self.scroll_cell = self.scroll_cell or self.editing is not None
+
+    def hold_chars(self, label: str) -> None:
+        """
+        Hold what is typed while the edit box label waits for focus, for place_caret to add: imgui focuses it a frame
+        late, and would drop those characters or type them over the selection.
+        """
+        if imgui.internal.get_active_id() != imgui.get_id(label):
+            io = imgui.get_io()
+            self.chars_held += "".join(chr(c) for c in io.input_queue_characters if c >= 32 and c != 127)
+            io.input_queue_characters.clear()
+
+    def place_caret(self, data: imgui.InputTextCallbackData) -> int:
+        """When an edit box opens, put the caret at caret_edit, else at the end, with nothing selected, and add what was held."""
+        if data.event_activated:
+            end = data.buf_text_len
+            data.cursor_pos = data.selection_start = data.selection_end = end if self.caret_edit is None else min(self.caret_edit, end)
+            if self.chars_held:
+                data.insert_chars(data.cursor_pos, self.chars_held)
+            self.caret_edit, self.chars_held = None, ""
+        return 0
+
+    def draw_choices(self) -> None:
+        """
+        A choice or ref cell's list, dropped from the cell: typing filters it, Up and Down move through it, Enter or
+        Tab picks and moves on as in the table, a click picks, and Escape keeps what was there.
+        """
+        em = imgui.get_font_size()
+        table, _, name = self.editing
+        _, kind, choices = next(column for column in COLUMNS[table] if column[0] == name)
+        # a choice cell can be cleared; a ref cell cannot
+        options = [r[name] for r in self.rows_slices[choices]] if kind == "ref" else ["", *choices]
+        width = max(12 * em, self.rect_choice.get_width() if self.rect_choice else 0.0, *(imgui.calc_text_size(o).x + 2 * em for o in options))
+        if imgui.is_window_appearing():
+            imgui.set_keyboard_focus_here()
+        self.hold_chars("##filter_choice")
+        imgui.set_next_item_width(width)
+        _, self.filter_choice = imgui.input_text_with_hint("##filter_choice", "type to filter", self.filter_choice, imgui.InputTextFlags_.callback_always, self.place_caret)
+        typed = self.filter_choice.strip().lower()
+        shown = [o for o in options if typed in (o or "(none)").lower()]
+        if imgui.is_item_edited() or self.pick_choice not in shown:
+            self.pick_choice = next((o for o in shown if (o or "(none)").lower().startswith(typed)), shown[0] if shown else None)
+        step = int(imgui.is_key_pressed(imgui.Key.down_arrow)) - int(imgui.is_key_pressed(imgui.Key.up_arrow))
+        if step and self.pick_choice in shown:
+            self.pick_choice = shown[min(max(shown.index(self.pick_choice) + step, 0), len(shown) - 1)]
+        clicked = None
+        with imgui_ctx.begin_child("##options", imgui.ImVec2(width, max(min(len(shown), 12), 1) * imgui.get_text_line_height_with_spacing())):
+            if not shown:
+                imgui.text_disabled("no match")
+            for option in shown:
+                # the value there now stands out
+                if option == self.text_before:
+                    imgui.push_style_color(imgui.Col_.text, ACCENT)
+                if imgui.selectable(f"{option or '(none)'}##{option}", option == self.pick_choice)[0]:
+                    clicked = option
+                if option == self.text_before:
+                    imgui.pop_style_color()
+                if step and option == self.pick_choice:
+                    imgui.set_scroll_here_y()
+        back = -1 if imgui.get_io().key_shift else 1
+        enter = imgui.is_key_pressed(imgui.Key.enter) or imgui.is_key_pressed(imgui.Key.keypad_enter)
+        tab = imgui.is_key_pressed(imgui.Key.tab)
+        if imgui.is_key_pressed(imgui.Key.escape):
+            self.editing = None
+            imgui.close_current_popup()
+        elif clicked is not None or ((enter or tab) and self.pick_choice is not None):
+            self.commit_edit(text=self.pick_choice if clicked is None else clicked)
+            if clicked is None:
+                self.move_cell(table, back if enter else 0, 0 if enter else back)
+            imgui.close_current_popup()
 
     def select(self, name: str) -> None:
         self.selected = name
@@ -970,12 +1157,13 @@ class Lab4App:
         draw_wrapped("Move PML data to BioHPC with Lab4 metadata", DIM)
 
     def draw_body(self) -> None:
-        """The sign-in card, or the rail and current page. Esc goes back to Overview."""
+        """The sign-in card, or the rail and current page. Esc goes back to Overview, once no slice cell is outlined."""
         self.poll()
         if not self.user:
             self.draw_login()
             return
-        if imgui.is_key_pressed(imgui.Key.escape) and not imgui.is_any_item_active() and not imgui.is_popup_open("", imgui.PopupFlags_.any_popup_id):
+        outlined = self.page == "slices" and self.cell is not None
+        if imgui.is_key_pressed(imgui.Key.escape) and not imgui.is_any_item_active() and not imgui.is_popup_open("", imgui.PopupFlags_.any_popup_id) and not outlined:
             self.page = "home"
         em = imgui.get_font_size()
         avail = imgui.get_content_region_avail()
@@ -1709,7 +1897,9 @@ class Lab4App:
         ]
         flags = imgui.TableFlags_.row_bg | imgui.TableFlags_.borders_inner_h | imgui.TableFlags_.scroll_y | imgui.TableFlags_.resizable
         height = max(8 * em, 0.45 * imgui.get_content_region_avail().y)
-        if imgui.begin_table("##results", 8, flags, imgui.ImVec2(0, height)):
+        # narrower than 40em, the table scrolls sideways rather than squeezing recording to nothing; 0 fits it to the view
+        width_inner = 0.0 if imgui.get_content_region_avail().x >= 40 * em else 40 * em
+        if imgui.begin_table("##results", 8, flags | imgui.TableFlags_.scroll_x, imgui.ImVec2(0, height), width_inner):
             imgui.table_setup_scroll_freeze(0, 1)
             imgui.table_setup_column("recording", imgui.TableColumnFlags_.width_stretch, 2.0)
             imgui.table_setup_column("unit", imgui.TableColumnFlags_.width_fixed, 6 * em)
@@ -1749,7 +1939,7 @@ class Lab4App:
                     imgui.text_disabled(", ".join(row["storages"]))
             imgui.end_table()
         shown = f"{len(rows)} of {len(self.overview['rows'])} units"
-        imgui.text_disabled(shown if self.overview["rows"] else "nothing cataloged yet; Scan machines, or Scan a folder in Browse storage")
+        draw_wrapped(shown if self.overview["rows"] else "nothing cataloged yet; Scan machines, or Scan a folder in Browse storage", DIM)
         picked = next((row for row in self.overview["rows"] if (row["recording"], row["unit"]) == self.picked_result), None)
         if picked is not None:
             self.draw_result(row=picked)
@@ -1853,7 +2043,7 @@ class Lab4App:
                 selected, _ = imgui.begin_tab_item(f"{table.capitalize()} ({len(self.rows_slices[table])})###tab_{table}", None, flags)
                 if selected:
                     if self.tab_slices != table:
-                        self.editing = None
+                        self.editing = self.cell = None
                     self.tab_slices = table
                     imgui.end_tab_item()
             imgui.end_tab_bar()
@@ -1881,7 +2071,9 @@ class Lab4App:
                 picked.clear()
                 picked.add(id_)
                 self.scroll_slices = id_
-                self.message, self.failed = f"added a row to {table}; double-click cells to edit", False
+                # outline its first cell to fill, so typing starts there
+                self.cell = (table, id_, next(name for name, kind, _ in columns if kind not in ("joined", "owner")))
+                self.message, self.failed = f"added a row to {table}; type to fill the outlined cell, Tab for the next", False
         if imgui.is_item_hovered():
             hints = {
                 "slices": "new slice for the picked slice's patient, or the newest patient",
@@ -1900,14 +2092,15 @@ class Lab4App:
             self.scroll_slices = made[0] if made else None
             self.message, self.failed = f"copied {len(made)} row(s)", False
         imgui.same_line()
-        pressed = imgui.is_key_pressed(imgui.Key.delete) and not imgui.is_any_item_active() and not imgui.is_popup_open("", imgui.PopupFlags_.any_popup_id)
+        # Delete alone empties a cell, as in Excel
+        pressed = imgui.get_io().key_ctrl and imgui.is_key_pressed(imgui.Key.delete) and not imgui.is_any_item_active() and not imgui.is_popup_open("", imgui.PopupFlags_.any_popup_id)
         if imgui.button(f"{fa.ICON_FA_TRASH}  Delete") or (picked and pressed):
             key = "patient_id" if table == "patients" else "slice_id"
             names = [str(r[key]) for r in rows_picked]
             lines = [f"{len(names)} row(s) from {table}: {', '.join(names[:8])}{' ...' if len(names) > 8 else ''}", f"in {self.slices.path}", "Data files are not touched."]
             self.confirm = {"title": "Delete rows?", "lines": lines, "button": "Delete", "run": self.delete_rows, "args": (table, sorted(picked))}
         if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
-            idl.wrapped_tooltip("delete picked rows (Delete key); for a failed slice, set its outcome instead")
+            idl.wrapped_tooltip("delete picked rows (Ctrl+Delete); for a failed slice, set its outcome instead")
         imgui.end_disabled()
         if table in ("patients", "slices"):
             below, key = ("slices", "patient_id") if table == "patients" else ("assays", "slice_id")
@@ -1919,12 +2112,14 @@ class Lab4App:
                 self.tab_request = below
             imgui.end_disabled()
         text_reset = f"{fa.ICON_FA_ARROWS_ROTATE}  Reset rows"
-        spacing = imgui.get_style().item_spacing.x
         width_user = 8 * em
-        room = imgui.get_content_region_avail().x - imgui.calc_text_size(text_reset).x - 2 * imgui.get_style().frame_padding.x
-        room -= width_user + imgui.calc_text_size("acting as").x + 3 * spacing
+        width_right = imgui.calc_text_size("acting as").x + width_user + imgui.calc_text_size(text_reset).x
+        width_right += 2 * imgui.get_style().frame_padding.x + 2 * imgui.get_style().item_spacing.x
         imgui.same_line()
-        imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + max(0.0, room))
+        if imgui.get_content_region_avail().x < width_right:
+            # too narrow beside the buttons: right-aligned on a line of its own
+            imgui.new_line()
+        imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + max(0.0, imgui.get_content_region_avail().x - width_right))
         imgui.align_text_to_frame_padding()
         imgui.text_disabled("acting as")
         imgui.same_line()
@@ -1977,7 +2172,9 @@ class Lab4App:
             for i, (name, _, _) in enumerate(columns):
                 # default sort: collection date, region, patient, day
                 flags_column = imgui.TableColumnFlags_.default_sort if table == "slices" and i < 4 else 0
-                imgui.table_setup_column(name, flags_column | (imgui.TableColumnFlags_.no_hide if i == 0 else 0))
+                # the first column, where rows are picked, stays shown and first
+                flags_column |= imgui.TableColumnFlags_.no_hide | imgui.TableColumnFlags_.no_reorder if i == 0 else 0
+                imgui.table_setup_column(name, flags_column)
             imgui.table_headers_row()
             specs = imgui.table_get_sort_specs()
             if specs is not None and specs.specs_dirty:
@@ -1988,11 +2185,25 @@ class Lab4App:
                 specs.specs_dirty = False
                 self.order_rows(table=table)
                 order = self.order_slices[table]
+            names = [name for name, _, _ in columns]
+            self.shown_slices = columns_shown(len(columns))
+            self.keys_cell(table=table)
+            if self.cell is not None and (self.editing is not None or not imgui.is_any_item_active()):
+                # Tab moves the outlined cell, not imgui's focus
+                imgui.internal.set_key_owner(imgui.Key.tab, imgui.get_id("##cells"))
             hits = [i for i, row in enumerate(order) if row["id"] == self.scroll_slices]
+            # the row and column the outlined cell moved to, drawn and scrolled to even when off screen
+            moved = None
+            if self.scroll_cell and self.cell is not None:
+                moved = next(((i, names.index(self.cell[2])) for i, row in enumerate(order) if row["id"] == self.cell[1]), None)
+            self.scroll_cell = False
+            self.rect_choice = None
             clipper = imgui.ListClipper()
             clipper.begin(len(order))
             if hits:
                 clipper.include_item_by_index(hits[0])
+            if moved is not None:
+                clipper.include_item_by_index(moved[0])
             while clipper.step():
                 for i in range(clipper.display_start, clipper.display_end):
                     row = order[i]
@@ -2002,6 +2213,8 @@ class Lab4App:
                             continue
                         value = row[name]
                         if c == 0:
+                            if moved is not None and i == moved[0]:
+                                scroll_to_cell(moved[1])
                             x = imgui.get_cursor_pos_x()
                             flags_row = imgui.SelectableFlags_.span_all_columns | imgui.SelectableFlags_.allow_overlap | imgui.SelectableFlags_.allow_double_click
                             clicked, _ = imgui.selectable(f"##row_{row['id']}", row["id"] in picked, flags_row)
@@ -2022,8 +2235,10 @@ class Lab4App:
                                 if not io.key_shift:
                                     self.anchor[table] = row["id"]
                                 column = imgui.table_get_hovered_column()
-                                if imgui.is_mouse_double_clicked(imgui.MouseButton_.left) and 0 <= column < len(columns):
-                                    self.start_edit(table, row, column)
+                                if 0 <= column < len(columns):
+                                    self.cell = (table, row["id"], names[column])
+                                    if imgui.is_mouse_double_clicked(imgui.MouseButton_.left):
+                                        self.start_edit(table, row, column, x_click=imgui.get_mouse_pos().x)
                             imgui.same_line()
                             imgui.set_cursor_pos_x(x)
                             if not can_edit(row["owner"], self.user_slices):
@@ -2034,13 +2249,30 @@ class Lab4App:
                             if self.focus_edit:
                                 imgui.set_keyboard_focus_here()
                                 self.focus_edit = False
-                            imgui.set_next_item_width(max(imgui.get_content_region_avail().x, 8 * em))
-                            flags_edit = imgui.InputTextFlags_.enter_returns_true | imgui.InputTextFlags_.auto_select_all
-                            entered, self.text_edit = imgui.input_text("##edit", self.text_edit, flags_edit)
-                            if entered or imgui.is_item_deactivated_after_edit():
-                                self.commit_edit(text=self.text_edit)
-                            elif imgui.is_item_deactivated():
+                                self.caret_edit = None if self.x_click is None else caret_at(self.text_edit, self.x_click - imgui.get_cursor_screen_pos().x)
+                            self.hold_chars("##edit")
+                            # no frame padding: the text stays where it was and the row keeps its height
+                            imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(0, 0))
+                            imgui.set_next_item_width(imgui.get_content_region_avail().x)
+                            flags_edit = imgui.InputTextFlags_.enter_returns_true | imgui.InputTextFlags_.callback_always
+                            entered, self.text_edit = imgui.input_text("##edit", self.text_edit, flags_edit, self.place_caret)
+                            imgui.pop_style_var()
+                            back = -1 if imgui.get_io().key_shift else 1
+                            step = (back, 0) if entered else None
+                            if step is None and imgui.is_item_active():
+                                keys = {imgui.Key.tab: (0, back), imgui.Key.up_arrow: (-1, 0), imgui.Key.down_arrow: (1, 0)}
+                                step = next((s for key, s in keys.items() if imgui.is_key_pressed(key)), None)
+                            if imgui.is_item_deactivated() and imgui.is_key_pressed(imgui.Key.escape):
+                                # Escape keeps what was there
                                 self.editing = None
+                            elif step is not None:
+                                self.commit_edit(text=self.text_edit)
+                                self.move_cell(table, *step)
+                                if imgui.is_item_active():
+                                    imgui.internal.clear_active_id()
+                            elif imgui.is_item_deactivated():
+                                # clicking away saves, as in Excel
+                                self.commit_edit(text=self.text_edit)
                         elif value is None or value == "":
                             imgui.text("")
                         elif editing:
@@ -2059,25 +2291,27 @@ class Lab4App:
                             imgui.text_disabled(value)
                         else:
                             imgui.text(str(value))
-                        if kind == "text" and value and imgui.is_item_hovered():
+                        if kind == "text" and value and not editing and imgui.is_item_hovered():
                             idl.wrapped_tooltip(value)
+                        if editing and kind in ("choice", "ref"):
+                            self.rect_choice = rect_cell(c)
+                        if self.cell == (table, row["id"], name):
+                            edge = rect_cell(c)
+                            color = imgui.color_convert_float4_to_u32(ACCENT)
+                            imgui.get_window_draw_list().add_rect(imgui.ImVec2(edge.min.x + 1, edge.min.y + 1), imgui.ImVec2(edge.max.x - 1, edge.max.y - 1), color, thickness=2.0)
             imgui.end_table()
 
         if self.open_choice:
             imgui.open_popup("##choice")
             self.open_choice = False
+        if self.rect_choice is not None:
+            # the list drops from the cell, as Excel's does
+            imgui.set_next_window_pos(imgui.ImVec2(self.rect_choice.min.x, self.rect_choice.max.y), imgui.Cond_.appearing)
         if imgui.begin_popup("##choice"):
             if self.editing is None:
                 imgui.close_current_popup()
             else:
-                _, kind, choices = next(column for column in COLUMNS[self.editing[0]] if column[0] == self.editing[2])
-                imgui.text_disabled(self.editing[2])
-                imgui.separator()
-                # a choice cell can be cleared; a ref cell cannot
-                options = [r[self.editing[2]] for r in self.rows_slices[choices]] if kind == "ref" else ["", *choices]
-                for option in options:
-                    if imgui.selectable(option or "(none)", option == self.text_edit)[0]:
-                        self.commit_edit(text=option)
+                self.draw_choices()
             imgui.end_popup()
         elif self.editing is not None and next(column[1] for column in COLUMNS[self.editing[0]] if column[0] == self.editing[2]) in ("choice", "ref"):
             self.editing = None
@@ -2089,7 +2323,8 @@ class Lab4App:
         files, claimed, heading = self.files_of(table, row, slice_)
 
         flags_detail = imgui.TableFlags_.sizing_stretch_same | imgui.TableFlags_.borders_inner_v
-        if not imgui.begin_table("##slice_detail", 2, flags_detail, imgui.ImVec2(0, imgui.get_content_region_avail().y)):
+        # in a short window the table keeps its 8 lines and the page scrolls to these 3
+        if not imgui.begin_table("##slice_detail", 2, flags_detail, imgui.ImVec2(0, max(3 * em, imgui.get_content_region_avail().y))):
             return
         imgui.table_next_row()
         imgui.table_next_column()
@@ -2097,9 +2332,11 @@ class Lab4App:
             if row is None:
                 draw_wrapped("Pick a row to see its details and files.", DIM)
                 draw_wrapped(
-                    "Double-click a cell to edit. Ctrl or shift-click picks several rows. Shift-click headers to sort by "
-                    "several; right-click one to hide columns. Filter with words, column:value or column=value for an exact "
-                    "match. file_match: every word must be in the path, a date matches any spelling, and -word excludes.",
+                    "Edit cells as in Excel: double-click one, or click it and type, or press F2. Enter, Tab and the arrows "
+                    "move on, Escape cancels, Delete empties a cell. Ctrl or shift-click picks several rows; Ctrl+Delete "
+                    "deletes them. Shift-click headers to sort by several; right-click one to hide columns. Filter with "
+                    "words, column:value or column=value for an exact match. file_match: every word must be in the path, a "
+                    "date matches any spelling, and -word excludes.",
                     DIM,
                 )
             elif table == "patients":
@@ -2202,7 +2439,7 @@ class Lab4App:
             if self.mounts is None:
                 imgui.text_disabled(f"looking for {s.mount_base} mounts...")
             elif not self.mounts:
-                imgui.text_disabled(f"no {s.mount_base} mount found; map the share first (e.g. SSHFS-Win)")
+                draw_wrapped(f"no {s.mount_base} mount found; map the share first (e.g. SSHFS-Win)", DIM)
             else:
                 imgui.text_disabled(f"{s.mount_base} mounts found:")
                 for i, mount in enumerate(self.mounts):
@@ -2390,3 +2627,4 @@ def run() -> None:
     params.callbacks.show_gui = app.dialog.render
     immapp.run(params)
     app.executor.shutdown(wait=False, cancel_futures=True)
+    app.executor_long.shutdown(wait=False, cancel_futures=True)

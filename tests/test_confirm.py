@@ -27,6 +27,7 @@ def app(tmp_path, monkeypatch):
     made.recording.subject_id = "M231"
     yield made
     made.executor.shutdown(wait=True)
+    made.executor_long.shutdown(wait=True)
 
 
 def test_transfer_asks_first(app, tmp_path):

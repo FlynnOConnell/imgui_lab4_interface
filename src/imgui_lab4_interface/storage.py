@@ -3,15 +3,18 @@ BioHPC storage, or a machine in Settings.machines, over a mounted share or ssh, 
 files to BioHPC.
 
 Paths are always the storage's own: BioHPC paths (/biohpc/data2/...), the ones Lab4 stores, or the machine's.
-Nothing here deletes, moves or renames; open_write and mkdir are the only writes.
+Nothing here deletes, moves or renames; open_write, open_tree and mkdir are the only writes.
 """
 
+import io
 import json
 import os
 import posixpath
 import shlex
 import subprocess
 import sys
+import tarfile
+import tempfile
 from pathlib import Path
 from typing import BinaryIO, Iterator, NamedTuple, Optional, Protocol
 
@@ -24,12 +27,39 @@ SIZE_CHUNK = 1 << 20
 TIMEOUT_SSH = 15
 TIMEOUT_WALK = 1800
 FILES_PER_CAT = 200
+# how long a shared ssh connection outlives its last command
+SECONDS_SHARED = 60
+# the longest unix socket path macOS takes (Linux takes 107)
+LENGTH_SOCKET = 103
+LINES_ERROR = 3
 FLAGS_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
 
 def is_pruned(name: str) -> bool:
     """Whether walk lists a folder without entering it."""
     return name.startswith(".") or (name.endswith(".zarr") and not name.endswith(SUFFIX_VNOISER))
+
+
+def options_shared() -> list[str]:
+    """
+    ssh options that share one connection per host, so a command after the first costs no new login. None on Windows,
+    whose ssh cannot, or when the socket cannot be made: ~/.ssh is missing, or the path is too long, which ssh treats
+    as fatal.
+    """
+    folder = str(Path.home() / ".ssh")
+    path = f"{folder}/lab4-%C"
+    # %C expands to 40 characters, and ssh binds the socket as <path>.<16 random characters> first
+    too_long = len(path) - len("%C") + 40 + 17 > LENGTH_SOCKET
+    if sys.platform == "win32" or not os.path.isdir(folder) or too_long or any(c in folder for c in " %"):
+        return []
+    return ["-o", "ControlMaster=auto", "-o", f"ControlPath={path}", "-o", f"ControlPersist={SECONDS_SHARED}"]
+
+
+def ssh_error(text: str) -> str:
+    """The first lines of ssh's stderr, without OpenSSH's ** notices, e.g. that the server lacks post-quantum keys."""
+    lines = [line for line in text.strip().splitlines() if line.strip() and not line.startswith("**")]
+    more = len(lines) - LINES_ERROR
+    return "\n".join(lines[:LINES_ERROR] + ([f"... and {more} more"] if more > 0 else []))
 
 
 class Entry(NamedTuple):
@@ -70,6 +100,9 @@ class Storage(Protocol):
 
     def open_write(self, path: str) -> BinaryIO:
         """Open path for writing, making its parent folders."""
+
+    def open_tree(self, dest: str) -> "FileByFile | SshTar":
+        """Write files under the folder dest, in order, with add(relative path, size, source)."""
 
     def walk(self, root: str) -> Iterator[Record]:
         """Everything under root, root itself excluded."""
@@ -136,6 +169,9 @@ class MountedStorage:
         target.parent.mkdir(parents=True, exist_ok=True)
         return target.open("wb")
 
+    def open_tree(self, dest: str) -> "FileByFile":
+        return FileByFile(self, dest)
+
     def walk(self, root: str) -> Iterator[Record]:
         self.check()
         top = self.local(root)
@@ -174,7 +210,7 @@ class SshReader:
         self.proc.stdout.close()
         code = self.proc.wait()
         if code != 0:
-            raise OSError(self.proc.stderr.read().decode(errors="replace").strip() or f"reading {self.path} failed")
+            raise OSError(ssh_error(self.proc.stderr.read().decode(errors="replace")) or f"reading {self.path} failed")
 
     def __enter__(self) -> "SshReader":
         return self
@@ -190,44 +226,118 @@ class SshReader:
 
 
 class SshWriter:
-    """Writes a remote file through ssh `cat`; close raises if it failed."""
+    """Streams into a remote command, `cat > path` by default; close raises if it failed."""
 
-    def __init__(self, base: list[str], path: str):
-        command = f"mkdir -p {shlex.quote(posixpath.dirname(path))} && cat > {shlex.quote(path)}"
+    def __init__(self, base: list[str], path: str, command: Optional[str] = None):
+        command = command or f"mkdir -p {shlex.quote(posixpath.dirname(path))} && cat > {shlex.quote(path)}"
         self.path = path
-        self.proc = subprocess.Popen([*base, command], stdin=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=FLAGS_NO_WINDOW)
+        # a file, not a pipe: tar reports an error per file, and a full pipe would stall ssh mid-write
+        self.errors = tempfile.TemporaryFile()
+        self.proc = subprocess.Popen([*base, command], stdin=subprocess.PIPE, stderr=self.errors, creationflags=FLAGS_NO_WINDOW)
 
     def write(self, chunk: bytes) -> None:
         self.proc.stdin.write(chunk)
 
-    def close(self) -> None:
-        self.proc.stdin.close()
+    def wait(self) -> Optional[str]:
+        """Close the stream and wait for ssh; why it failed, or None."""
+        try:
+            self.proc.stdin.close()
+        except BrokenPipeError:
+            # the remote side stopped reading; its exit code says whether that was a failure
+            pass
         code = self.proc.wait()
-        if code != 0:
-            raise OSError(self.proc.stderr.read().decode(errors="replace").strip() or f"writing {self.path} failed")
+        self.errors.seek(0)
+        text = ssh_error(self.errors.read().decode(errors="replace"))
+        self.errors.close()
+        return None if code == 0 else text or f"writing {self.path} failed"
+
+    def close(self) -> None:
+        failed = self.wait()
+        if failed is not None:
+            raise OSError(failed)
 
     def __enter__(self) -> "SshWriter":
         return self
 
+    def __exit__(self, kind, error, trace) -> None:
+        if kind is None:
+            self.close()
+            return
+        # the error that stopped the write stands, unless it is the broken pipe of the remote side failing
+        failed = self.wait()
+        if isinstance(error, BrokenPipeError) and failed is not None:
+            raise OSError(failed) from error
+
+
+class FileByFile:
+    """Writes files under a storage folder with one open_write each."""
+
+    def __init__(self, storage: Storage, dest: str):
+        self.storage = storage
+        self.dest = dest
+
+    def add(self, relative: str, size: int, src: BinaryIO) -> None:
+        with self.storage.open_write(f"{self.dest}/{relative}") as dst:
+            while chunk := src.read(SIZE_CHUNK):
+                dst.write(chunk)
+
+    def __enter__(self) -> "FileByFile":
+        return self
+
     def __exit__(self, *exc) -> None:
-        self.close()
+        pass
+
+
+class SshTar:
+    """
+    Writes files under a remote folder as one tar through one ssh, unpacked as it arrives, instead of a login per
+    file. Only files are sent, so tar leaves existing folders' permissions alone; -m gives each file the time it lands,
+    as cat would.
+    """
+
+    def __init__(self, base: list[str], dest: str):
+        self.writer = SshWriter(base, dest, command=f"cd {shlex.quote(dest)} && tar -xmf -")
+        self.tar = tarfile.open(fileobj=self.writer, mode="w|")
+
+    def add(self, relative: str, size: int, src: BinaryIO) -> None:
+        info = tarfile.TarInfo(relative)
+        # the remote umask applies, as it does to cat
+        info.size, info.mode = size, 0o666
+        self.tar.addfile(info, src)
+
+    def __enter__(self) -> "SshTar":
+        return self
+
+    def __exit__(self, kind, error, trace) -> None:
+        # tarfile writes the end of the archive only when nothing failed, so a cut file is never padded out as whole
+        try:
+            self.tar.__exit__(kind, error, trace)
+        finally:
+            self.writer.__exit__(kind, error, trace)
 
 
 class SshStorage:
-    """BioHPC over ssh. BatchMode never prompts, so a missing key fails fast."""
+    """
+    BioHPC over ssh. BatchMode never prompts, so a missing key fails fast. Commands share one connection per host
+    where ssh can (options_shared), and keepalives end a dead one within a minute instead of hanging.
+    """
 
     def __init__(self, host: str, label: Optional[str] = None):
         self.host = host
         self.label = label or f"ssh {host}"
-        self.base = ["ssh", "-o", "BatchMode=yes", "-o", f"ConnectTimeout={TIMEOUT_SSH}", "-o", "StrictHostKeyChecking=accept-new", host]
+        self.base = [
+            "ssh", "-o", "BatchMode=yes", "-o", f"ConnectTimeout={TIMEOUT_SSH}", "-o", "StrictHostKeyChecking=accept-new",
+            "-o", f"ServerAliveInterval={TIMEOUT_SSH}", "-o", "ServerAliveCountMax=3", *options_shared(), host,
+        ]
 
     def run(self, command: str, timeout: float = 4 * TIMEOUT_SSH) -> str:
         try:
-            result = subprocess.run([*self.base, command], capture_output=True, text=True, timeout=timeout, creationflags=FLAGS_NO_WINDOW)
+            # remote names are utf-8; the Windows locale would misread them
+            result = subprocess.run([*self.base, command], capture_output=True, encoding="utf-8", errors="replace", timeout=timeout, creationflags=FLAGS_NO_WINDOW)
         except (FileNotFoundError, subprocess.TimeoutExpired) as e:
             raise OSError(f"ssh {self.host}: {e}") from e
         if result.returncode != 0:
-            raise OSError(result.stderr.strip() or f"ssh {self.host} exited {result.returncode}")
+            raise OSError(ssh_error(result.stderr) or f"ssh {self.host} exited {result.returncode}")
         return result.stdout
 
     def check(self) -> None:
@@ -265,6 +375,9 @@ class SshStorage:
 
     def open_write(self, path: str) -> SshWriter:
         return SshWriter(self.base, path)
+
+    def open_tree(self, dest: str) -> SshTar:
+        return SshTar(self.base, dest)
 
     def walk(self, root: str) -> Iterator[Record]:
         fmt = r"'%y\t%s\t%T@\t%p\n'"
@@ -418,29 +531,45 @@ class Transfer:
         return self.done / self.total if self.total else 0.0
 
     def run(self) -> None:
+        """Copy every file, then the sidecars, through one open_tree: over ssh, one login and one tar."""
+        names_taken = set()
+        if not self.overwrite and self.storage.exists(self.dest):
+            names_taken = {entry.name for entry in self.storage.listdir(self.dest)}
         plan = []
         for source in self.sources:
             target = f"{self.dest}/{source.name}"
-            if not self.overwrite and self.storage.exists(target):
+            if source.name in names_taken:
                 raise FileExistsError(f"{target} already exists; tick overwrite to replace it")
-            if not self.overwrite and self.metadata is not None and self.storage.exists(f"{target}{SIDECAR_SUFFIX}"):
+            if self.metadata is not None and f"{source.name}{SIDECAR_SUFFIX}" in names_taken:
                 raise FileExistsError(f"{target}{SIDECAR_SUFFIX} already exists; tick overwrite to replace it")
             if source.is_dir():
-                plan += [(p, f"{target}/{p.relative_to(source).as_posix()}") for p in sorted(source.rglob("*")) if p.is_file()]
+                plan += [(p, f"{source.name}/{p.relative_to(source).as_posix()}") for p in sorted(source.rglob("*")) if p.is_file()]
             else:
-                plan.append((source, target))
+                plan.append((source, source.name))
         self.total = sum(p.stat().st_size for p, _ in plan)
         self.storage.mkdir(self.dest)
-        for local, remote in plan:
-            self.current = remote
-            with local.open("rb") as src, self.storage.open_write(remote) as dst:
-                while chunk := src.read(SIZE_CHUNK):
-                    if self.cancelled:
-                        raise InterruptedError(f"cancelled; {remote} is incomplete")
-                    dst.write(chunk)
-                    self.done += len(chunk)
-        if self.metadata is not None:
-            for source in self.sources:
-                text = json.dumps({**self.metadata, "source": str(source)}, indent=2)
-                write_text(self.storage, f"{self.dest}/{source.name}{SIDECAR_SUFFIX}", text)
+        with self.storage.open_tree(self.dest) as tree:
+            for local, relative in plan:
+                self.current = f"{self.dest}/{relative}"
+                with local.open("rb") as src:
+                    tree.add(relative, local.stat().st_size, Counted(transfer=self, src=src))
+            if self.metadata is not None:
+                for source in self.sources:
+                    text = json.dumps({**self.metadata, "source": str(source)}, indent=2).encode()
+                    tree.add(f"{source.name}{SIDECAR_SUFFIX}", len(text), io.BytesIO(text))
         self.current = ""
+
+
+class Counted:
+    """A Transfer's source file: what is read adds to its done, and reading stops once it is cancelled."""
+
+    def __init__(self, transfer: Transfer, src: BinaryIO):
+        self.transfer = transfer
+        self.src = src
+
+    def read(self, n: int = -1) -> bytes:
+        if self.transfer.cancelled:
+            raise InterruptedError(f"cancelled; {self.transfer.current} is incomplete")
+        chunk = self.src.read(n)
+        self.transfer.done += len(chunk)
+        return chunk

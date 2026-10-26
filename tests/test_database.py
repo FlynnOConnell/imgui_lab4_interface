@@ -201,3 +201,4 @@ def test_window_signs_in_and_registers(lab_credentials, tag, tmp_path, monkeypat
     settle(app)
     assert app.failed and "already registered" in app.message
     app.executor.shutdown(wait=True)
+    app.executor_long.shutdown(wait=True)
