@@ -4,13 +4,22 @@ A desktop app for the PML lab: copy data to BioHPC, attach Lab4 metadata, and re
 database. Built on [imgui-bundle](https://github.com/pthom/imgui_bundle) and
 [imgui_data_loader](https://github.com/FlynnOConnell/imgui_data_loader).
 
+<p align="center">
+  <a href="docs/screenshots/transfer.png"><img src="docs/screenshots/transfer.png" width="32%" alt="Transfer: two sources, a new BioHPC folder and the recording's Lab4 metadata"></a>
+  <a href="docs/screenshots/browse.png"><img src="docs/screenshots/browse.png" width="32%" alt="Browse storage: a session folder on BioHPC with its datasets and a .mesc's sidecar"></a>
+  <a href="docs/screenshots/results.png"><img src="docs/screenshots/results.png" width="32%" alt="Results: each recording's units with their runs and result files across machines"></a>
+</p>
+<p align="center">
+  <sub>Transfer · Browse storage · Results, with made-up data. More in <a href="docs/screenshots">docs/screenshots</a>.</sub>
+</p>
+
 ## Install
 
 ```bash
 git clone https://github.com/FlynnOConnell/imgui_lab4_interface.git
 cd imgui_lab4_interface
-uv venv && uv pip install -e ".[dev]"
-lab4
+uv sync
+uv run lab4
 ```
 
 ## Links
@@ -18,6 +27,9 @@ lab4
 - [Lab docs](https://doc.memorylongevity.org/)
 - [Lab4 docs](https://lab4.memorylongevity.org/)
 - [Lab4 workspace](http://server.memorylongevity.org): sign in with GitLab and download your credentials
+- [Screenshots](docs/screenshots): [Overview](docs/screenshots/overview.png), [Transfer](docs/screenshots/transfer.png),
+  [Browse storage](docs/screenshots/browse.png), [Results](docs/screenshots/results.png),
+  [Settings > Machines](docs/screenshots/settings-machines.png)
 
 ## Use
 
@@ -69,7 +81,9 @@ lab4
 7. **Human slices.** Track human slices, with demo rows seeded from Shobhana's files in `/biohpc/data4/Shobhana`.
    A slice's `file_match` finds its files: every word must be in the path, a `YYYY-MM-DD` word matches any spelling
    of that date (`7-27-2026`, `260727`, `May21st_2026`), and `-word` excludes. Filter the tables with words,
-   `column:value`, or `column=value` for an exact match. Double-click a file to open it; over
+   `column:value`, or `column=value` for an exact match. Cells edit as in Excel: double-click one, or click it and
+   type or press F2; Enter, Tab and the arrows move on, Escape cancels, Delete empties a cell, and Ctrl+Delete
+   deletes the picked rows. Double-click a file to open it; over
    ssh it is first copied to `~/.imgui_lab4_interface/cache`, after asking. Rows belong to whoever added them;
    `shobhana` is the admin. *acting as* picks the user.
 
@@ -109,7 +123,7 @@ LAB4_SECRETS_PATH=.dev/secrets.json lab4
 ## Tests
 
 ```bash
-.venv/Scripts/python -m pytest
+uv run pytest
 ```
 
 Tests point `LAB4_SECRETS_PATH` at a missing file. `tests/test_database.py` needs the development database and
