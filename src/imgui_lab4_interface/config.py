@@ -3,10 +3,13 @@
 import dataclasses
 import json
 import os
+import platform
 from pathlib import Path
 from typing import Optional
 
 BACKENDS = ("mounted", "ssh")
+# how this computer reaches a machine's files
+REACHES = ("local", "mounted", "ssh")
 
 DESTINATIONS = [
     ["/biohpc/data2", "BioHPC data2"],
@@ -21,6 +24,11 @@ def data_dir() -> Path:
     path = Path(base) if base else Path.home() / ".imgui_lab4_interface"
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def this_computer() -> dict:
+    """A machine entry for this computer with nothing to catalog yet."""
+    return {"name": platform.node() or "this computer", "reach": "local", "host": "", "mount_root": "", "mount_base": "/", "roots": []}
 
 
 @dataclasses.dataclass
@@ -42,6 +50,10 @@ class Settings:
         email (str): SLURM mail address; empty for none
         dir_asap7 (str): BioHPC folder holding run_asap7.sh; ~/ is the BioHPC home
         cluster_root (str): Where mount_base is on BioHPC nodes
+        machines (list): Computers whose results the Results page catalogs. Each is a dict: name; reach, one of
+            REACHES; host, the ssh alias or user@host; mount_root, the local folder showing the machine's
+            mount_base; roots, the machine's folders to catalog, in its own paths (~ is this computer's home
+            for a local machine)
     """
 
     backend: str = "mounted"
@@ -58,6 +70,7 @@ class Settings:
     email: str = ""
     dir_asap7: str = "~/repos/pml_utilities/hpc/asap7"
     cluster_root: str = "/project/OBI/OBI_faculty/Losonczy_lab/shared"
+    machines: list = dataclasses.field(default_factory=lambda: [this_computer()])
 
     @classmethod
     def load(cls, path: Optional[Path] = None) -> "Settings":

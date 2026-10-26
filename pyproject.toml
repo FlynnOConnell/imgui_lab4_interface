@@ -23,6 +23,7 @@ dev = ["pytest==9.1.1"]
 
 [project.scripts]
 lab4 = "imgui_lab4_interface.app:run"
+lab4-scan = "imgui_lab4_interface.catalog:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

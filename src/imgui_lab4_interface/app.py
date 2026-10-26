@@ -7,6 +7,7 @@ import posixpath
 import shutil
 import subprocess
 import sys
+import time
 import webbrowser
 from collections import Counter
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -20,12 +21,12 @@ from imgui_bundle import icons_fontawesome_6 as fa
 from imgui_bundle import portable_file_dialogs as pfd
 
 from imgui_lab4_interface import __version__, lab4, processing, viewers
-from imgui_lab4_interface.catalog import KINDS, Catalog, classify_file
-from imgui_lab4_interface.config import BACKENDS, Settings, data_dir
+from imgui_lab4_interface.catalog import KINDS, Catalog, classify_file, scan_machines
+from imgui_lab4_interface.config import BACKENDS, REACHES, Settings, data_dir, this_computer
 from imgui_lab4_interface.database import BIOHPC, Credentials, Lab4Database, Schema, secrets_path
 from imgui_lab4_interface.processing import Asap7Params, Job, MescUnit
 from imgui_lab4_interface.slices import ADMIN, COLUMNS, PEOPLE, ROOT, SliceDatabase, can_edit, file_dates, locked, match_files
-from imgui_lab4_interface.storage import SIDECAR_SUFFIX, Entry, Mount, SshStorage, Transfer, destination_state, download, find_mounts, open_storage, write_text
+from imgui_lab4_interface.storage import SIDECAR_SUFFIX, Entry, Mount, SshStorage, Transfer, destination_state, download, find_mounts, open_machine, open_storage, write_text
 
 ACCENT = imgui.ImVec4(0.40, 0.68, 1.00, 1.0)
 KEY = imgui.ImVec4(1.00, 0.80, 0.20, 1.0)
@@ -61,12 +62,17 @@ WIDTH_LOGIN_EM = 22
 TITLE_PICKER = "Choose destination"
 NUMBER_JOBS_SHOWN = 8
 STATES_FAILED = ("FAILED", "CANCELLED", "TIMEOUT", "OUT_OF_MEMORY", "NODE_FAIL", "PREEMPTED")
+# how often Results checks whether another process, e.g. lab4-scan, changed the catalog
+SECONDS_WATCH = 3.0
+COLORS_RUN = {"done": OK, "completed": OK, "failed": ERROR, "running": ACCENT}
+NAMES_REACH = {"local": "This computer", "mounted": "Mounted here", "ssh": "SSH"}
 
 # rail pages: key, icon, name, subtitle
 PAGES = (
     ("home", fa.ICON_FA_HOUSE, "Overview", "what this does and where data goes"),
     ("transfer", fa.ICON_FA_CLOUD_ARROW_UP, "Transfer", "copy data to BioHPC with its metadata"),
     ("browse", fa.ICON_FA_SITEMAP, "Browse storage", "browse BioHPC, open datasets, add metadata"),
+    ("results", fa.ICON_FA_CHART_LINE, "Results", "each recording's units, with the runs and results on every machine"),
     ("slices", fa.ICON_FA_TABLE, "Human slices", "track human slices from collection to assay (demo data)"),
     ("settings", fa.ICON_FA_GEAR, "Settings", "connection, destinations, viewers and processing"),
 )
@@ -119,6 +125,20 @@ def draw_cards(cards: list[tuple[str, str, str]]) -> Optional[int]:
         if idl.icon_button(icon, name, imgui.ImVec2(width, 3.2 * em), theme=THEME, tooltip=tooltip):
             clicked = i
     return clicked
+
+
+def format_rate(fs: Optional[float]) -> str:
+    return "" if not fs else f"{fs:.0f}" if fs >= 100 else f"{fs:.1f}"
+
+
+def draw_run_counts(runs: list[dict]) -> None:
+    """Runs by status as colored counts, e.g. 3 done in green then 1 failed in red."""
+    for i, (status, n) in enumerate(sorted(Counter(run["status"] for run in runs).items())):
+        if i:
+            imgui.same_line(0, 0.4 * imgui.get_font_size())
+        imgui.text_colored(COLORS_RUN.get(status, DIM), str(n))
+        if imgui.is_item_hovered():
+            idl.wrapped_tooltip(f"{n} {status or 'no status'}")
 
 
 def read_mesc(sources: list[Path]) -> list[tuple[str, str, list[MescUnit] | str]]:
@@ -217,6 +237,15 @@ class Lab4App:
         # catalog info for the browse folder
         self.described: dict = {"folder": None, "scan": None, "items": {}}
         self.count_scanned = 0
+        # Results: the catalog's rows and scans, the picked (recording, unit), and the machine scan's progress
+        self.overview: dict = {"rows": [], "scans": []}
+        self.picked_result: Optional[tuple[str, str]] = None
+        self.filter_results = ""
+        self.all_units = False
+        self.scanning = ("", 0)
+        self.errors_scan: list[str] = []
+        self.mtime_catalog: Optional[float] = None
+        self.watched = 0.0
         self.slices = SliceDatabase()
         if self.slices.moved_aside is not None:
             self.message = f"slice table schema changed; old file saved as {self.slices.moved_aside}"
@@ -378,6 +407,49 @@ class Lab4App:
 
     def count_scan(self, n: int) -> None:
         self.count_scanned = n
+
+    def scan_machines(self) -> None:
+        """Catalog every root of every machine in Settings, then reload Results."""
+        self.errors_scan = []
+        self.submit("scan_machines", scan_machines, self.catalog, copy.deepcopy(self.settings.machines), self.count_machine_scan)
+
+    def count_machine_scan(self, where: str, n: int) -> None:
+        self.scanning = (where, n)
+
+    def watch_catalog(self) -> None:
+        """Reload Results when the catalog changed, every SECONDS_WATCH at most."""
+        now = time.monotonic()
+        if now - self.watched < SECONDS_WATCH or "overview" in self.futures:
+            return
+        self.watched = now
+        try:
+            mtime = self.catalog.path.stat().st_mtime
+        except OSError:
+            return
+        if mtime != self.mtime_catalog:
+            self.mtime_catalog = mtime
+            self.submit("overview", self.catalog.overview)
+
+    def open_on(self, label: str, path: str, kind: Optional[str]) -> None:
+        """Open a path on a machine, or on BioHPC, in place: in kind's viewer, or its default app when kind is None."""
+        if label == self.storage.label:
+            storage = self.storage
+        else:
+            storage = next((open_machine(m) for m in self.settings.machines if m["name"] == label), None)
+        if storage is None:
+            self.message, self.failed = f"{label} is not in Settings > Machines", True
+            return
+        try:
+            local = storage.local_path(path)
+        except OSError as e:
+            self.message, self.failed = str(e), True
+            return
+        if local is None:
+            self.message, self.failed = f"{label} is reached over ssh; mount it to open {posixpath.basename(path)}", True
+        elif not local.exists():
+            self.message, self.failed = f"{local} not found; is {label} mounted?", True
+        else:
+            self.open_local(local=local, kind=kind)
 
     def open_dataset(self, path: str, kind: str) -> None:
         """Open path in the viewer for its kind."""
@@ -598,6 +670,22 @@ class Lab4App:
                 self.message = f"scan failed: {error}" if found is None else f"scanned {found['root']}: {found['datasets']} datasets in {found['records']} items ({found['seconds']:.1f} s)"
                 self.failed = found is None
                 self.describe()
+                # its runs and results show on Results once linked
+                self.submit("link", self.catalog.link)
+            elif name == "link":
+                self.watched = 0.0
+            elif name == "scan_machines":
+                found, self.errors_scan = ([], [str(error)]) if error is not None else future.result()
+                runs = sum(scan["runs"] for scan in found)
+                self.message = f"scanned {len(found)} folder(s), {runs} runs" + (f"; {len(self.errors_scan)} not reachable" if self.errors_scan else "")
+                self.failed = bool(self.errors_scan) and not found
+                self.scanning = ("", 0)
+                self.watched = 0.0
+            elif name == "overview":
+                if error is None:
+                    self.overview = future.result()
+                else:
+                    self.message, self.failed = f"cannot read the catalog: {error}", True
             elif name == "files_index":
                 if error is None:
                     self.files_index, self.indexed = future.result()
@@ -1024,6 +1112,8 @@ class Lab4App:
             self.draw_transfer()
         elif key == "browse":
             self.draw_browse()
+        elif key == "results":
+            self.draw_results()
         elif key == "slices":
             self.draw_slices()
         else:
@@ -1093,15 +1183,16 @@ class Lab4App:
     def draw_home(self) -> None:
         """Page cards, links, destinations and the files a transfer writes."""
         em = imgui.get_font_size()
-        pages = [page for page in PAGES if page[0] in ("transfer", "browse", "slices")]
+        pages = [page for page in PAGES if page[0] in ("transfer", "browse", "results", "slices")]
         i = draw_cards([(icon, name, hint) for key, icon, name, hint in pages])
         if i is not None:
             self.page = pages[i][0]
         imgui.dummy(imgui.ImVec2(0, 0.6 * em))
         draw_wrapped(
             "Transfer copies data to BioHPC with a metadata sidecar beside it. Browse storage opens datasets, adds "
-            "sidecars to data already there, and registers .h5 files in Lab4. Human slices tracks each slice from "
-            "patient to assay (demo data).",
+            "sidecars to data already there, and registers .h5 files in Lab4. Results lists each recording's units "
+            "with the pipeline runs and figures found on your machines. Human slices tracks each slice from patient "
+            "to assay (demo data).",
             DIM,
         )
         imgui.dummy(imgui.ImVec2(0, 0.6 * em))
@@ -1573,12 +1664,174 @@ class Lab4App:
         if imgui.collapsing_header(f"{fa.ICON_FA_TAGS}  Metadata: {self.recording.label()}###browse_metadata"):
             self.draw_recording()
 
+    def draw_results(self) -> None:
+        """Scan and filter, each machine's last scan, a row per recording and unit, then the picked row's details."""
+        em = imgui.get_font_size()
+        self.watch_catalog()
+        scanning = "scan_machines" in self.futures
+        imgui.begin_disabled(scanning)
+        if imgui.button(f"{fa.ICON_FA_DATABASE}  Scan machines"):
+            self.scan_machines()
+        imgui.end_disabled()
+        if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
+            idl.wrapped_tooltip("catalog the roots of every machine in Settings > Machines; lab4-scan does the same from a timer")
+        imgui.same_line()
+        _, self.all_units = imgui.checkbox("all units", self.all_units)
+        if imgui.is_item_hovered():
+            idl.wrapped_tooltip("also list units no run or result uses yet")
+        imgui.same_line()
+        imgui.set_next_item_width(-1)
+        _, self.filter_results = imgui.input_text_with_hint("##filter_results", "filter by recording, unit, indicator or machine", self.filter_results)
+
+        last = {}
+        for scan in self.overview["scans"]:
+            last[scan["storage"]] = max(last.get(scan["storage"], ""), scan["scanned_at"])
+        names = [m["name"] for m in self.settings.machines]
+        for i, name in enumerate(names + sorted(set(last) - set(names))):
+            if i:
+                imgui.same_line(0, 1.5 * em)
+            imgui.text_colored(OK if name in last else DIM, f"{fa.ICON_FA_LAPTOP}  {name}")
+            imgui.same_line()
+            imgui.text_disabled(f"scanned {last[name][5:16].replace('T', ' ')}" if name in last else "not scanned")
+        if not names:
+            draw_wrapped("Add the computers to catalog in Settings > Machines.", DIM)
+        if scanning:
+            imgui.text_colored(ACCENT, f"scanning {self.scanning[0]}... {self.scanning[1]} items listed")
+        for line in self.errors_scan:
+            draw_wrapped(line, WARN)
+
+        needle = self.filter_results.strip().lower()
+        rows = [
+            row
+            for row in self.overview["rows"]
+            if (self.all_units or row["runs"] or row["results"])
+            and needle in " ".join([row["recording"], row["unit"], row["indicator"], row["lab4"], *row["storages"]]).lower()
+        ]
+        flags = imgui.TableFlags_.row_bg | imgui.TableFlags_.borders_inner_h | imgui.TableFlags_.scroll_y | imgui.TableFlags_.resizable
+        height = max(8 * em, 0.45 * imgui.get_content_region_avail().y)
+        if imgui.begin_table("##results", 8, flags, imgui.ImVec2(0, height)):
+            imgui.table_setup_scroll_freeze(0, 1)
+            imgui.table_setup_column("recording", imgui.TableColumnFlags_.width_stretch, 2.0)
+            imgui.table_setup_column("unit", imgui.TableColumnFlags_.width_fixed, 6 * em)
+            imgui.table_setup_column("Hz", imgui.TableColumnFlags_.width_fixed, 3 * em)
+            imgui.table_setup_column("frames", imgui.TableColumnFlags_.width_fixed, 3.5 * em)
+            imgui.table_setup_column("indicator", imgui.TableColumnFlags_.width_fixed, 5 * em)
+            imgui.table_setup_column("runs", imgui.TableColumnFlags_.width_fixed, 3.5 * em)
+            imgui.table_setup_column("results", imgui.TableColumnFlags_.width_fixed, 3.5 * em)
+            imgui.table_setup_column("on", imgui.TableColumnFlags_.width_stretch, 1.0)
+            imgui.table_headers_row()
+            clipper = imgui.ListClipper()
+            clipper.begin(len(rows))
+            while clipper.step():
+                for i in range(clipper.display_start, clipper.display_end):
+                    row = rows[i]
+                    key = (row["recording"], row["unit"])
+                    imgui.table_next_row()
+                    imgui.table_next_column()
+                    if imgui.selectable(f"{row['recording'] or '(unknown recording)'}##result_{i}", key == self.picked_result, imgui.SelectableFlags_.span_all_columns)[0]:
+                        self.picked_result = key
+                    if imgui.is_item_hovered():
+                        idl.wrapped_tooltip(f"{row['recording']} {row['unit']}" + (f"\nLab4 recording {row['lab4']}" if row["lab4"] else ""))
+                    imgui.table_next_column()
+                    # most recordings have one session, so the table leaves MSession_0 out
+                    imgui.text(row["unit"].removeprefix("MSession_0/") or "whole file")
+                    imgui.table_next_column()
+                    imgui.text_disabled(format_rate(row["fs"]))
+                    imgui.table_next_column()
+                    imgui.text_disabled(str(row["frames"] or ""))
+                    imgui.table_next_column()
+                    imgui.text_colored(KEY, row["indicator"])
+                    imgui.table_next_column()
+                    draw_run_counts(row["runs"])
+                    imgui.table_next_column()
+                    imgui.text_disabled(str(len(row["results"])) if row["results"] else "")
+                    imgui.table_next_column()
+                    imgui.text_disabled(", ".join(row["storages"]))
+            imgui.end_table()
+        shown = f"{len(rows)} of {len(self.overview['rows'])} units"
+        imgui.text_disabled(shown if self.overview["rows"] else "nothing cataloged yet; Scan machines, or Scan a folder in Browse storage")
+        picked = next((row for row in self.overview["rows"] if (row["recording"], row["unit"]) == self.picked_result), None)
+        if picked is not None:
+            self.draw_result(row=picked)
+
+    def draw_result(self, row: dict) -> None:
+        """The picked unit's data files, runs and result files, each opened in place on its machine."""
+        em = imgui.get_font_size()
+        facts = [row["unit"] or "whole file", f"{format_rate(row['fs'])} Hz" if row["fs"] else "", f"{row['frames']} frames" if row["frames"] else "", row["indicator"]]
+        imgui.text_colored(ACCENT, f"{fa.ICON_FA_CHART_LINE}  {row['recording'] or '(unknown recording)'}")
+        imgui.same_line()
+        imgui.text_disabled(" · ".join(fact for fact in facts if fact) + (f" · Lab4 {row['lab4']}" if row["lab4"] else ""))
+        with imgui_ctx.begin_child("##result"):
+            for i, data in enumerate(row["data"]):
+                kind = classify_file(posixpath.basename(data["path"]))
+                if imgui.small_button(f"{fa.ICON_FA_EYE}  Open##data_{i}"):
+                    self.open_on(data["storage"], data["path"], kind)
+                if imgui.is_item_hovered():
+                    idl.wrapped_tooltip(f"open in {KINDS[kind][0] if kind else 'its default app'}")
+                imgui.same_line()
+                imgui.text_disabled(data["storage"])
+                imgui.same_line()
+                imgui.text_colored(PATH, data["path"])
+            if not row["data"]:
+                imgui.text_disabled("no data file found for this unit; runs name it in their input")
+            flags = imgui.TableFlags_.row_bg | imgui.TableFlags_.borders_inner_h | imgui.TableFlags_.sizing_stretch_prop
+            if row["runs"] and imgui.begin_table("##result_runs", 6, flags):
+                imgui.table_setup_column("##open", imgui.TableColumnFlags_.width_fixed, 5.5 * em)
+                imgui.table_setup_column("status", imgui.TableColumnFlags_.width_fixed, 4.5 * em)
+                imgui.table_setup_column("started", imgui.TableColumnFlags_.width_fixed, 7.5 * em)
+                imgui.table_setup_column("pipeline", imgui.TableColumnFlags_.width_stretch, 1.5)
+                imgui.table_setup_column("on", imgui.TableColumnFlags_.width_fixed, 5 * em)
+                imgui.table_setup_column("error", imgui.TableColumnFlags_.width_stretch, 1.5)
+                imgui.table_headers_row()
+                for i, run in enumerate(row["runs"]):
+                    imgui.table_next_row()
+                    imgui.table_next_column()
+                    viewer = "masknmf-run" if run["kind"] == "masknmf-run" else None
+                    if imgui.small_button(f"{fa.ICON_FA_EYE}##run_{i}"):
+                        self.open_on(run["storage"], run["path"], viewer)
+                    if imgui.is_item_hovered():
+                        idl.wrapped_tooltip("open in masknmf view" if viewer else "open the folder")
+                    if run["log"]:
+                        imgui.same_line()
+                        if imgui.small_button(f"{fa.ICON_FA_FILE_LINES}##log_{i}"):
+                            self.open_on(run["storage"], run["log"], None)
+                        if imgui.is_item_hovered():
+                            idl.wrapped_tooltip(f"open {posixpath.basename(run['log'])}")
+                    imgui.table_next_column()
+                    imgui.text_colored(COLORS_RUN.get(run["status"], DIM), run["status"] or "-")
+                    imgui.table_next_column()
+                    imgui.text_disabled(run["started"])
+                    imgui.table_next_column()
+                    imgui.text(run["pipeline"] or run["kind"])
+                    if imgui.is_item_hovered():
+                        idl.wrapped_tooltip(f"{run['path']}\ninput: {run['input'] or 'not recorded'}")
+                    imgui.table_next_column()
+                    imgui.text_disabled(run["storage"])
+                    imgui.table_next_column()
+                    imgui.text_colored(ERROR, run["error"])
+                    if run["error"] and imgui.is_item_hovered():
+                        idl.wrapped_tooltip(run["error"])
+                imgui.end_table()
+            if row["results"]:
+                imgui.dummy(imgui.ImVec2(0, 0.3 * em))
+                imgui.text_disabled(f"{len(row['results'])} result files · double-click to open")
+                for i, result in enumerate(row["results"]):
+                    where = posixpath.basename(result["run"]) if result["run"] else posixpath.basename(posixpath.dirname(result["path"]))
+                    flags_row = imgui.SelectableFlags_.allow_double_click
+                    icon = ICONS_FILE.get(posixpath.splitext(result["path"])[1].lower(), fa.ICON_FA_FILE)
+                    clicked, _ = imgui.selectable(f"{icon}  {posixpath.basename(result['path'])}   {where} · {result['storage']}##res_file_{i}", False, flags_row)
+                    if clicked and imgui.is_mouse_double_clicked(imgui.MouseButton_.left):
+                        self.open_on(result["storage"], result["path"], None)
+                    if imgui.is_item_hovered():
+                        idl.wrapped_tooltip(result["path"])
+
     def draw_settings(self) -> None:
         """One tab per group of settings; Save writes them all."""
         if imgui.begin_tab_bar("##settings"):
             tabs = (
                 ("Connection", self.draw_connection),
                 ("Destinations", self.draw_destinations),
+                ("Machines", self.draw_machines),
                 ("Viewers", self.draw_viewers),
                 ("Processing", self.draw_processing_settings),
             )
@@ -1985,6 +2238,54 @@ class Lab4App:
             s.destinations.pop(remove)
         if imgui.button(f"{fa.ICON_FA_PLUS}  Add destination"):
             s.destinations.append(["", ""])
+
+    def draw_machines(self) -> None:
+        """Computers Results catalogs, and how this one reaches each."""
+        em = imgui.get_font_size()
+        s = self.settings
+        draw_wrapped(
+            "Computers whose recordings, runs and results Results lists. Roots are that machine's folders to catalog, "
+            "one per line, in its own paths. Mount a machine (e.g. sshfs) to open its files here; over ssh they are only listed.",
+            DIM,
+        )
+        remove = None
+        for i, machine in enumerate(s.machines):
+            imgui.push_id(f"machine_{i}")
+            if imgui.small_button(fa.ICON_FA_XMARK):
+                remove = i
+            imgui.same_line()
+            imgui.text_colored(ACCENT, f"{fa.ICON_FA_LAPTOP}  {machine['name'] or 'new machine'}")
+            if self.begin_form(f"machine_{i}"):
+                self.row("name")
+                _, machine["name"] = imgui.input_text_with_hint("##name", "unique, e.g. pml-w1", machine["name"])
+                self.row("reached")
+                for reach in REACHES:
+                    if imgui.radio_button(NAMES_REACH[reach], machine["reach"] == reach):
+                        machine["reach"] = reach
+                    imgui.same_line()
+                imgui.new_line()
+                if machine["reach"] == "ssh":
+                    self.row("host")
+                    _, machine["host"] = imgui.input_text_with_hint("##host", "ssh alias or user@host, keys set up", machine["host"])
+                elif machine["reach"] == "mounted":
+                    self.row("mounted at")
+                    _, machine["mount_root"] = imgui.input_text_with_hint("##mount_root", r"local folder, e.g. ~/pml-w1, or Z:\ on Windows", machine["mount_root"])
+                    self.row("shows")
+                    _, machine["mount_base"] = imgui.input_text_with_hint("##mount_base", "the machine's path there, e.g. /home/fo", machine["mount_base"])
+                self.row("roots")
+                changed, text = imgui.input_text_multiline("##roots", "\n".join(machine["roots"]), imgui.ImVec2(-1, 3.2 * em))
+                if changed:
+                    machine["roots"] = text.split("\n")
+                imgui.end_table()
+            imgui.pop_id()
+            imgui.dummy(imgui.ImVec2(0, 0.3 * em))
+        if remove is not None:
+            s.machines.pop(remove)
+        if imgui.button(f"{fa.ICON_FA_PLUS}  Add machine"):
+            s.machines.append({**this_computer(), "name": "", "reach": "mounted"})
+        names = [m["name"] for m in s.machines]
+        if len(set(names)) < len(names) or "" in names:
+            draw_wrapped("Each machine needs its own name: the catalog keys its rows by it.", WARN)
 
     def draw_viewers(self) -> None:
         """Viewer commands."""

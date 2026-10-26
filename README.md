@@ -28,12 +28,15 @@ lab4
      With no mount root set, a single `/biohpc` mount found on this machine is used; with none, ssh to
      `lab-research`, the lab server alias pml_utilities uses. **Detect** lists mounts.
    - *Destinations*: the folders Transfer offers.
+   - *Machines*: the computers Results catalogs (this one, lab machines, home computers). Each is reached as
+     *this computer*, *mounted here* (a local folder showing one of its folders, e.g. `~/pml-w1` showing
+     `/home/fo`), or *ssh* (listed only), with the folders to catalog in its own paths.
    - *Viewers*: the `mbo` and `masknmf` commands, on `PATH` or full paths.
    - *Processing*: the ssh host jobs are submitted through (a BioHPC login node, `biohpc` by default), GPU
      partition, GPUs, email, and the pipeline folder
      (`~/repos/pml_utilities/hpc/asap7`; see its README).
 
-   Paths are always BioHPC paths (`/biohpc/data2/...`), as Lab4 stores them.
+   Paths are always BioHPC paths (`/biohpc/data2/...`), as Lab4 stores them, and a machine's own paths for a machine.
 3. **Transfer.**
    1. *Sources*: add files or folders.
    2. *Destination*: type a BioHPC folder or **Browse...**. A missing folder is made when its parent exists.
@@ -49,7 +52,14 @@ lab4
    **Scan** catalogs a folder and everything under it. Double-click a folder to enter it, or a dataset to open it.
    Select an `.h5` (from `lab4.convert`) to **Register in Lab4**; new experiment groups, subjects and sessions are
    added in the same transaction.
-5. **Human slices.** Track human slices, with demo rows seeded from Shobhana's files in `/biohpc/data4/Shobhana`.
+5. **Results.** One row per recording and unit, with its frame rate, frames, indicator, the masknmf and vnoiser
+   runs on it and their figures and tables, from every machine. Pick a row to open its data in `mbo`, a run in
+   `masknmf view` or its log, or double-click a result file. **Scan machines** catalogs every machine's folders;
+   `lab4-scan [machine ...]` does the same headless, e.g. from a timer. Units come from `.mesc` headers (read only
+   where the file opens in place) and `<recording>__MSession_N_MUnit_N.tif` exports; runs and results are matched
+   to them by the recording and unit names in their paths and inputs. A machine that doesn't answer keeps its last
+   scan.
+6. **Human slices.** Track human slices, with demo rows seeded from Shobhana's files in `/biohpc/data4/Shobhana`.
    A slice's `file_match` finds its files: every word must be in the path, a `YYYY-MM-DD` word matches any spelling
    of that date (`7-27-2026`, `260727`, `May21st_2026`), and `-word` excludes. Filter the tables with words,
    `column:value`, or `column=value` for an exact match. Double-click a file to open it; over
@@ -73,7 +83,7 @@ Under `~/.imgui_lab4_interface/` (or `IMGUI_LAB4_HOME`):
 | `settings.json` | settings |
 | `recent.json` | recent sources, shown in the rail |
 | `window.ini` | window layout |
-| `catalog.sqlite` | the catalog: `datasets`, `folders`, `metadata`, `scans` |
+| `catalog.sqlite` | the catalog: `datasets`, `folders`, `metadata`, `units`, `runs`, `results`, `scans` |
 | `slices.sqlite` | the slice tables: `patients`, `slices`, `assays`, and the `files` index |
 | `cache/` | files copied from BioHPC to open |
 | `logs/` | viewer output |

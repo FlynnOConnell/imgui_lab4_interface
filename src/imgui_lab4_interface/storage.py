@@ -1,8 +1,9 @@
 """
-BioHPC storage, over a mounted share or ssh, and Transfer, which copies local files to it.
+BioHPC storage, or a machine in Settings.machines, over a mounted share or ssh, and Transfer, which copies local
+files to BioHPC.
 
-Paths are always BioHPC paths (/biohpc/data2/...), the ones Lab4 stores. Nothing here deletes, moves or renames;
-open_write and mkdir are the only writes.
+Paths are always the storage's own: BioHPC paths (/biohpc/data2/...), the ones Lab4 stores, or the machine's.
+Nothing here deletes, moves or renames; open_write and mkdir are the only writes.
 """
 
 import json
@@ -17,10 +18,18 @@ from typing import BinaryIO, Iterator, NamedTuple, Optional, Protocol
 from imgui_lab4_interface.config import Settings
 
 SIDECAR_SUFFIX = ".lab4.json"
+# a vnoiser run is a zarr store holding its figures and tables, so walk enters it
+SUFFIX_VNOISER = ".vnoiser.zarr"
 SIZE_CHUNK = 1 << 20
 TIMEOUT_SSH = 15
 TIMEOUT_WALK = 1800
+FILES_PER_CAT = 200
 FLAGS_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+
+
+def is_pruned(name: str) -> bool:
+    """Whether walk lists a folder without entering it."""
+    return name.startswith(".") or (name.endswith(".zarr") and not name.endswith(SUFFIX_VNOISER))
 
 
 class Entry(NamedTuple):
@@ -30,7 +39,7 @@ class Entry(NamedTuple):
 
 
 class Record(NamedTuple):
-    """A file or folder found by walk; hidden and .zarr folders are listed but not entered."""
+    """A file or folder found by walk; hidden and .zarr folders other than vnoiser runs are listed but not entered."""
 
     path: str
     is_dir: bool
@@ -49,6 +58,9 @@ class Storage(Protocol):
     def listdir(self, path: str) -> list[Entry]: ...
 
     def read_text(self, path: str) -> str: ...
+
+    def read_texts(self, paths: list[str]) -> dict[str, str]:
+        """The text of each path that can be read; one round trip over ssh."""
 
     def mkdir(self, path: str) -> None:
         """Make the folder if missing; its parent must exist."""
@@ -73,12 +85,13 @@ class MountedStorage:
     Args:
         root (str): The local mount folder
         base (str): The BioHPC path root maps to
+        label (str): The catalog's name for this storage; root and base when not given
     """
 
-    def __init__(self, root: str, base: str = "/"):
+    def __init__(self, root: str, base: str = "/", label: Optional[str] = None):
         self.root = Path(root)
         self.base = "/" + base.strip("/")
-        self.label = f"{root} ({self.base})" if str(root) else "no mount root"
+        self.label = label or (f"{root} ({self.base})" if str(root) else "no mount root")
 
     def local(self, path: str) -> Path:
         if str(self.root) == ".":
@@ -102,6 +115,15 @@ class MountedStorage:
 
     def read_text(self, path: str) -> str:
         return self.local(path).read_text()
+
+    def read_texts(self, paths: list[str]) -> dict[str, str]:
+        texts = {}
+        for path in paths:
+            try:
+                texts[path] = self.local(path).read_text(errors="replace")
+            except OSError:
+                pass
+        return texts
 
     def mkdir(self, path: str) -> None:
         self.local(path).mkdir(exist_ok=True)
@@ -131,7 +153,7 @@ class MountedStorage:
                 stat = entry.stat(follow_symlinks=False)
                 path = f"{remote}/{entry.name}"
                 yield Record(path, is_dir, 0 if is_dir else stat.st_size, stat.st_mtime)
-                if is_dir and not entry.name.startswith(".") and not entry.name.endswith(".zarr"):
+                if is_dir and not is_pruned(entry.name):
                     stack.append((entry.path, path))
 
     def local_path(self, path: str) -> Optional[Path]:
@@ -194,9 +216,9 @@ class SshWriter:
 class SshStorage:
     """BioHPC over ssh. BatchMode never prompts, so a missing key fails fast."""
 
-    def __init__(self, host: str):
+    def __init__(self, host: str, label: Optional[str] = None):
         self.host = host
-        self.label = f"ssh {host}"
+        self.label = label or f"ssh {host}"
         self.base = ["ssh", "-o", "BatchMode=yes", "-o", f"ConnectTimeout={TIMEOUT_SSH}", "-o", "StrictHostKeyChecking=accept-new", host]
 
     def run(self, command: str, timeout: float = 4 * TIMEOUT_SSH) -> str:
@@ -225,6 +247,16 @@ class SshStorage:
     def read_text(self, path: str) -> str:
         return self.run(f"cat {shlex.quote(path)}")
 
+    def read_texts(self, paths: list[str]) -> dict[str, str]:
+        texts = {}
+        for start in range(0, len(paths), FILES_PER_CAT):
+            quoted = " ".join(shlex.quote(path) for path in paths[start : start + FILES_PER_CAT])
+            out = self.run(f"for f in {quoted}; do test -r \"$f\" && printf '\\036%s\\037' \"$f\" && cat -- \"$f\"; done; true", timeout=TIMEOUT_WALK)
+            for chunk in out.split("\x1e")[1:]:
+                path, _, text = chunk.partition("\x1f")
+                texts[path] = text
+        return texts
+
     def mkdir(self, path: str) -> None:
         self.run(f"test -d {shlex.quote(path)} || mkdir {shlex.quote(path)}")
 
@@ -236,7 +268,7 @@ class SshStorage:
 
     def walk(self, root: str) -> Iterator[Record]:
         fmt = r"'%y\t%s\t%T@\t%p\n'"
-        prune = r"\( -type d \( -name '.*' -o -name '*.zarr' \)"
+        prune = rf"\( -type d \( -name '.*' -o \( -name '*.zarr' ! -name '*{SUFFIX_VNOISER}' \) \)"
         out = self.run(f"find {shlex.quote(root)} -mindepth 1 {prune} -printf {fmt} -prune \\) -o -printf {fmt}", timeout=TIMEOUT_WALK)
         for line in out.splitlines():
             parts = line.split("\t", 3)
@@ -303,6 +335,23 @@ def open_storage(settings: Settings) -> Storage:
     if settings.backend == "ssh":
         return SshStorage(settings.ssh_host)
     return MountedStorage(settings.mount_root, settings.mount_base)
+
+
+def open_machine(machine: dict) -> Storage:
+    """Storage for one of Settings.machines, labelled with its name. A local machine sees this computer's home drive."""
+    if machine["reach"] == "ssh":
+        return SshStorage(machine["host"], label=machine["name"])
+    if machine["reach"] == "mounted":
+        return MountedStorage(os.path.expanduser(machine["mount_root"]), machine["mount_base"], label=machine["name"])
+    return MountedStorage(Path.home().anchor, "/", label=machine["name"])
+
+
+def machine_roots(machine: dict) -> list[str]:
+    """The machine's roots in its storage's paths, blank lines dropped."""
+    roots = [root.strip() for root in machine["roots"] if root.strip()]
+    if machine["reach"] != "local":
+        return roots
+    return ["/" + Path(os.path.expanduser(root)).relative_to(Path.home().anchor).as_posix() for root in roots]
 
 
 def destination_state(storage: Storage, path: str) -> tuple[str, str]:
