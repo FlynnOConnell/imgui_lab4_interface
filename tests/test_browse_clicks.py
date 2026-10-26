@@ -46,6 +46,8 @@ def run_window(app, draw: str, steps, size: tuple[int, int] = (1040, 720)) -> di
 
     def gui():
         frames[0] += 1
+        # the null backend ignores window_geometry.size
+        imgui.get_io().display_size = imgui.ImVec2(*size)
         app.dialog.render()
         if frames[0] == 20:
             te.queue_test(*tests[0])
@@ -231,7 +233,7 @@ def slice_toolbar(tmp: Path, width: int) -> dict:
 
     def steps(ctx, seen):
         reset = ctx.item_info(f"**/{fa.ICON_FA_ARROWS_ROTATE}  Reset rows")
-        user = ctx.item_info("**/##user_slices")
+        user = ctx.item_info("##user_slices")
         page = reset.window.inner_clip_rect
         seen["reset inside"] = reset.rect_full.max.x <= page.max.x
         seen["picker inside"] = user.rect_full.min.x >= page.min.x
@@ -281,7 +283,7 @@ def test_slice_cells_edit_as_in_excel(tmp_path, monkeypatch):
     }
 
 
-@pytest.mark.parametrize("width", [640, 1040, 1920])
+@pytest.mark.parametrize("width", [560, 640, 1040, 1920])
 def test_slice_toolbar_fits_the_window(tmp_path, monkeypatch, width):
     monkeypatch.setenv("IMGUI_LAB4_HOME", str(tmp_path / "home"))
     seen = clicks_in_subprocess(tmp_path, f"toolbar{width}")

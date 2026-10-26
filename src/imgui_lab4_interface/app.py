@@ -185,6 +185,19 @@ def human_bytes(n: int) -> str:
     return ""
 
 
+def width_button(label: str) -> float:
+    """How wide a button labeled label is."""
+    return imgui.calc_text_size(label).x + 2 * imgui.get_style().frame_padding.x
+
+
+def same_line_or_wrap(width: float) -> None:
+    """Put the next item, width wide, beside the last one if it fits there, else on the next line."""
+    # decided before moving: same_line then new_line would leave the line's end counted as content, widening the window
+    right = imgui.get_item_rect_max().x + imgui.get_style().item_spacing.x + width
+    if right <= imgui.get_cursor_screen_pos().x + imgui.get_content_region_avail().x:
+        imgui.same_line()
+
+
 def caret_at(text: str, x: float) -> int:
     """The utf-8 offset of the caret x pixels into text, where a click there would put it."""
     n = 0
@@ -1291,7 +1304,7 @@ class Lab4App:
         imgui.push_font(None, 1.35 * em)
         imgui.text_colored(ACCENT, f"{icon}  {name}")
         imgui.pop_font()
-        imgui.text_colored(DIM, hint)
+        draw_wrapped(hint, DIM)
         imgui.separator()
         imgui.dummy(imgui.ImVec2(0, 0.4 * em))
         if key == "home":
@@ -2081,9 +2094,10 @@ class Lab4App:
                 "assays": "new assay for the picked slice",
             }
             idl.wrapped_tooltip(hints[table])
-        imgui.same_line()
+        text_duplicate = f"{fa.ICON_FA_COPY}  Duplicate"
+        same_line_or_wrap(width_button(text_duplicate))
         imgui.begin_disabled(not picked)
-        if imgui.button(f"{fa.ICON_FA_COPY}  Duplicate"):
+        if imgui.button(text_duplicate):
             made = self.slices.duplicate(table, sorted(picked), self.user_slices)
             self.filter_slices[table] = ""
             self.reload_slices()
@@ -2091,10 +2105,11 @@ class Lab4App:
             picked.update(made)
             self.scroll_slices = made[0] if made else None
             self.message, self.failed = f"copied {len(made)} row(s)", False
-        imgui.same_line()
+        text_delete = f"{fa.ICON_FA_TRASH}  Delete"
+        same_line_or_wrap(width_button(text_delete))
         # Delete alone empties a cell, as in Excel
         pressed = imgui.get_io().key_ctrl and imgui.is_key_pressed(imgui.Key.delete) and not imgui.is_any_item_active() and not imgui.is_popup_open("", imgui.PopupFlags_.any_popup_id)
-        if imgui.button(f"{fa.ICON_FA_TRASH}  Delete") or (picked and pressed):
+        if imgui.button(text_delete) or (picked and pressed):
             key = "patient_id" if table == "patients" else "slice_id"
             names = [str(r[key]) for r in rows_picked]
             lines = [f"{len(names)} row(s) from {table}: {', '.join(names[:8])}{' ...' if len(names) > 8 else ''}", f"in {self.slices.path}", "Data files are not touched."]
@@ -2104,21 +2119,18 @@ class Lab4App:
         imgui.end_disabled()
         if table in ("patients", "slices"):
             below, key = ("slices", "patient_id") if table == "patients" else ("assays", "slice_id")
-            imgui.same_line()
+            text_below = f"{fa.ICON_FA_ARROW_RIGHT}  Show its {below}"
+            same_line_or_wrap(width_button(text_below))
             imgui.begin_disabled(len(rows_picked) != 1)
-            if imgui.button(f"{fa.ICON_FA_ARROW_RIGHT}  Show its {below}"):
+            if imgui.button(text_below):
                 self.filter_slices[below] = f"{key}={rows_picked[0][key]}"
                 self.order_rows(table=below)
                 self.tab_request = below
             imgui.end_disabled()
         text_reset = f"{fa.ICON_FA_ARROWS_ROTATE}  Reset rows"
         width_user = 8 * em
-        width_right = imgui.calc_text_size("acting as").x + width_user + imgui.calc_text_size(text_reset).x
-        width_right += 2 * imgui.get_style().frame_padding.x + 2 * imgui.get_style().item_spacing.x
-        imgui.same_line()
-        if imgui.get_content_region_avail().x < width_right:
-            # too narrow beside the buttons: right-aligned on a line of its own
-            imgui.new_line()
+        width_right = imgui.calc_text_size("acting as").x + width_user + width_button(text_reset) + 2 * imgui.get_style().item_spacing.x
+        same_line_or_wrap(width_right)
         imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + max(0.0, imgui.get_content_region_avail().x - width_right))
         imgui.align_text_to_frame_padding()
         imgui.text_disabled("acting as")
