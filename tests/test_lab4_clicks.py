@@ -26,10 +26,14 @@ def lab4_clicks(tmp: Path) -> dict:
 
     def steps(ctx, seen):
         ctx.item_click("**/M231##lab4_0")
-        seen["picked"] = app.picked_lab4["recording"]["device_name"] if app.picked_lab4 else None
+        seen["picked"] = (
+            app.picked_lab4["recording"]["device_name"] if app.picked_lab4 else None
+        )
         ctx.yield_(5)
         seen["sidecar"] = app.sidecar_lab4
-        seen["rewrite offered"] = ctx.item_exists("**/Save also rewrites rec.h5.lab4.json")
+        seen["rewrite offered"] = ctx.item_exists(
+            "**/Save also rewrites rec.h5.lab4.json"
+        )
         app.edits_lab4["recording"]["ui_label"] = "day 1"
         ctx.item_double_click("**/M231##lab4_0")
         seen["after double-click"] = [app.page, app.path_browse, app.selected]
@@ -42,10 +46,17 @@ def lab4_clicks(tmp: Path) -> dict:
 
 def test_a_recording_picks_and_shows_its_data(tmp_path, monkeypatch):
     monkeypatch.setenv("IMGUI_LAB4_HOME", str(tmp_path / "home"))
-    result = subprocess.run([sys.executable, __file__, str(tmp_path)], capture_output=True, text=True, timeout=120)
+    result = subprocess.run(
+        [sys.executable, __file__, str(tmp_path)],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
     lines = [line for line in result.stdout.splitlines() if line.startswith("{")]
     if not lines:
-        pytest.skip(f"the test engine did not report (exit {result.returncode}): {result.stderr[-500:]}")
+        pytest.skip(
+            f"the test engine did not report (exit {result.returncode}): {result.stderr[-500:]}"
+        )
     seen = json.loads(lines[-1])
     if "error" in seen:
         pytest.skip(f"null backend unavailable: {seen['error']}")

@@ -22,11 +22,46 @@ from imgui_bundle import portable_file_dialogs as pfd
 
 from imgui_lab4_interface import __version__, lab4, processing, viewers
 from imgui_lab4_interface.catalog import KINDS, Catalog, classify_file, scan_machines
-from imgui_lab4_interface.config import BACKENDS, REACHES, Settings, data_dir, this_computer
-from imgui_lab4_interface.database import BIOHPC, Credentials, Lab4Database, Schema, secrets_path
+from imgui_lab4_interface.config import (
+    BACKENDS,
+    REACHES,
+    Settings,
+    data_dir,
+    this_computer,
+)
+from imgui_lab4_interface.database import (
+    BIOHPC,
+    Credentials,
+    Lab4Database,
+    Schema,
+    secrets_path,
+)
 from imgui_lab4_interface.processing import Asap7Params, Job, MescUnit
-from imgui_lab4_interface.slices import ADMIN, COLUMNS, PEOPLE, ROOT, SliceDatabase, can_edit, file_dates, locked, match_files
-from imgui_lab4_interface.storage import SIDECAR_SUFFIX, Entry, Mount, SshStorage, Storage, Transfer, destination_state, download, find_mounts, open_machine, open_storage, write_text
+from imgui_lab4_interface.slices import (
+    ADMIN,
+    COLUMNS,
+    PEOPLE,
+    ROOT,
+    SliceDatabase,
+    can_edit,
+    file_dates,
+    locked,
+    match_files,
+)
+from imgui_lab4_interface.storage import (
+    SIDECAR_SUFFIX,
+    Entry,
+    Mount,
+    SshStorage,
+    Storage,
+    Transfer,
+    destination_state,
+    download,
+    find_mounts,
+    open_machine,
+    open_storage,
+    write_text,
+)
 
 ACCENT = imgui.ImVec4(0.40, 0.68, 1.00, 1.0)
 KEY = imgui.ImVec4(1.00, 0.80, 0.20, 1.0)
@@ -42,7 +77,11 @@ PATH = imgui.ImVec4(0.55, 0.85, 0.55, 1.0)
 CODE = imgui.ImVec4(0.75, 0.85, 0.65, 1.0)
 LIT = imgui.ImVec4(ACCENT.x, ACCENT.y, ACCENT.z, 0.22)
 CLEAR = imgui.ImVec4(0, 0, 0, 0)
-COLORS_GO = (imgui.ImVec4(0.13, 0.55, 0.13, 1.0), imgui.ImVec4(0.18, 0.65, 0.18, 1.0), imgui.ImVec4(0.10, 0.45, 0.10, 1.0))
+COLORS_GO = (
+    imgui.ImVec4(0.13, 0.55, 0.13, 1.0),
+    imgui.ImVec4(0.18, 0.65, 0.18, 1.0),
+    imgui.ImVec4(0.10, 0.45, 0.10, 1.0),
+)
 THEME = idl.Theme.dark().replace(
     accent=(ACCENT.x, ACCENT.y, ACCENT.z, 1.0),
     accent_hover=(0.50, 0.75, 1.00, 1.0),
@@ -61,37 +100,110 @@ WIDTH_CAPTION_EM = 9
 WIDTH_LOGIN_EM = 22
 TITLE_PICKER = "Choose destination"
 NUMBER_JOBS_SHOWN = 8
-STATES_FAILED = ("FAILED", "CANCELLED", "TIMEOUT", "OUT_OF_MEMORY", "NODE_FAIL", "PREEMPTED")
+STATES_FAILED = (
+    "FAILED",
+    "CANCELLED",
+    "TIMEOUT",
+    "OUT_OF_MEMORY",
+    "NODE_FAIL",
+    "PREEMPTED",
+)
 # how often Results checks whether another process, e.g. lab4-scan, changed the catalog
 SECONDS_WATCH = 3.0
 # workers that can run for minutes; they get their own threads, so listings and checks never wait behind them
-NAMES_LONG = ("transfer", "process", "scan", "link", "scan_machines", "files_index", "download")
+NAMES_LONG = (
+    "transfer",
+    "process",
+    "scan",
+    "link",
+    "scan_machines",
+    "files_index",
+    "download",
+)
 COLORS_RUN = {"done": OK, "completed": OK, "failed": ERROR, "running": ACCENT}
 NAMES_REACH = {"local": "This computer", "mounted": "Mounted here", "ssh": "SSH"}
 
 # rail pages: key, icon, name, subtitle
 PAGES = (
     ("home", fa.ICON_FA_HOUSE, "Overview", "what this does and where data goes"),
-    ("transfer", fa.ICON_FA_CLOUD_ARROW_UP, "Transfer", "copy data to BioHPC with its metadata"),
-    ("browse", fa.ICON_FA_SITEMAP, "Browse storage", "browse BioHPC, open datasets, add metadata"),
-    ("recordings", fa.ICON_FA_DATABASE, "Lab4 recordings", "the recordings in Lab4: edit their details and find their data"),
-    ("results", fa.ICON_FA_CHART_LINE, "Results", "each recording's units, with the runs and results on every machine"),
-    ("slices", fa.ICON_FA_TABLE, "Human slices", "track human slices from collection to assay (demo data)"),
-    ("settings", fa.ICON_FA_GEAR, "Settings", "connection, destinations, viewers and processing"),
+    (
+        "transfer",
+        fa.ICON_FA_CLOUD_ARROW_UP,
+        "Transfer",
+        "copy data to BioHPC with its metadata",
+    ),
+    (
+        "browse",
+        fa.ICON_FA_SITEMAP,
+        "Browse storage",
+        "browse BioHPC, open datasets, add metadata",
+    ),
+    (
+        "recordings",
+        fa.ICON_FA_DATABASE,
+        "Lab4 recordings",
+        "the recordings in Lab4: edit their details and find their data",
+    ),
+    (
+        "results",
+        fa.ICON_FA_CHART_LINE,
+        "Results",
+        "each recording's units, with the runs and results on every machine",
+    ),
+    (
+        "slices",
+        fa.ICON_FA_TABLE,
+        "Human slices",
+        "track human slices from collection to assay (demo data)",
+    ),
+    (
+        "settings",
+        fa.ICON_FA_GEAR,
+        "Settings",
+        "connection, destinations, viewers and processing",
+    ),
 )
 # overview links: icon, name, url, tooltip
 LINKS = (
-    (fa.ICON_FA_BOOK, "Lab docs", "https://doc.memorylongevity.org/", "lab documentation"),
-    (fa.ICON_FA_FLASK, "Lab4 docs", "https://lab4.memorylongevity.org/", "lab4 package docs"),
-    (fa.ICON_FA_SERVER, "Lab4 workspace", "http://server.memorylongevity.org", "sign in with GitLab and download your credentials"),
+    (
+        fa.ICON_FA_BOOK,
+        "Lab docs",
+        "https://doc.memorylongevity.org/",
+        "lab documentation",
+    ),
+    (
+        fa.ICON_FA_FLASK,
+        "Lab4 docs",
+        "https://lab4.memorylongevity.org/",
+        "lab4 package docs",
+    ),
+    (
+        fa.ICON_FA_SERVER,
+        "Lab4 workspace",
+        "http://server.memorylongevity.org",
+        "sign in with GitLab and download your credentials",
+    ),
 )
 # slice table colors for outcome and incubator
-COLORS_SLICE = {"ok": OK, "failed": ERROR, "in incubator": ACCENT, "out, recorded": OK, "out, imaged": CODE, "out, fixed": KEY}
+COLORS_SLICE = {
+    "ok": OK,
+    "failed": ERROR,
+    "in incubator": ACCENT,
+    "out, recorded": OK,
+    "out, imaged": CODE,
+    "out, fixed": KEY,
+}
 # file icons by extension
 ICONS_FILE = {
-    ".mesc": fa.ICON_FA_FILE_IMAGE, ".tif": fa.ICON_FA_FILE_IMAGE, ".tiff": fa.ICON_FA_FILE_IMAGE, ".png": fa.ICON_FA_FILE_IMAGE,
-    ".avi": fa.ICON_FA_FILE_VIDEO, ".mp4": fa.ICON_FA_FILE_VIDEO, ".pdf": fa.ICON_FA_FILE_PDF,
-    ".pxp": fa.ICON_FA_CHART_LINE, ".nwb": fa.ICON_FA_CHART_LINE,
+    ".mesc": fa.ICON_FA_FILE_IMAGE,
+    ".tif": fa.ICON_FA_FILE_IMAGE,
+    ".tiff": fa.ICON_FA_FILE_IMAGE,
+    ".png": fa.ICON_FA_FILE_IMAGE,
+    ".avi": fa.ICON_FA_FILE_VIDEO,
+    ".mp4": fa.ICON_FA_FILE_VIDEO,
+    ".pdf": fa.ICON_FA_FILE_PDF,
+    ".pxp": fa.ICON_FA_CHART_LINE,
+    ".nwb": fa.ICON_FA_CHART_LINE,
 }
 # files a transfer writes
 FILES = (
@@ -121,14 +233,19 @@ def draw_cards(cards: list[tuple[str, str, str]]) -> Optional[int]:
     em = imgui.get_font_size()
     gap = 1.0 * em
     avail = imgui.get_content_region_avail().x
-    width_name = max(imgui.calc_text_size(f"{icon}  {name}").x for icon, name, _ in cards) + 2 * em
+    width_name = (
+        max(imgui.calc_text_size(f"{icon}  {name}").x for icon, name, _ in cards)
+        + 2 * em
+    )
     per_row = min(len(cards), max(1, int((avail + gap) // (width_name + gap))))
     width = (avail - gap * (per_row - 1)) / per_row
     clicked = None
     for i, (icon, name, tooltip) in enumerate(cards):
         if i % per_row:
             imgui.same_line(0, gap)
-        if idl.icon_button(icon, name, imgui.ImVec2(width, 3.2 * em), theme=THEME, tooltip=tooltip):
+        if idl.icon_button(
+            icon, name, imgui.ImVec2(width, 3.2 * em), theme=THEME, tooltip=tooltip
+        ):
             clicked = i
     return clicked
 
@@ -139,7 +256,9 @@ def format_rate(fs: Optional[float]) -> str:
 
 def draw_run_counts(runs: list[dict]) -> None:
     """Runs by status as colored counts, e.g. 3 done in green then 1 failed in red."""
-    for i, (status, n) in enumerate(sorted(Counter(run["status"] for run in runs).items())):
+    for i, (status, n) in enumerate(
+        sorted(Counter(run["status"] for run in runs).items())
+    ):
         if i:
             imgui.same_line(0, 0.4 * imgui.get_font_size())
         imgui.text_colored(COLORS_RUN.get(status, DIM), str(n))
@@ -160,7 +279,15 @@ def read_mesc(sources: list[Path]) -> list[tuple[str, str, list[MescUnit] | str]
 
 def measure(sources: list[Path]) -> list[tuple[Path, int]]:
     """Each source with its size in bytes; a folder's is every file under it."""
-    return [(s, sum(f.stat().st_size for f in s.rglob("*") if f.is_file()) if s.is_dir() else s.stat().st_size) for s in sources]
+    return [
+        (
+            s,
+            sum(f.stat().st_size for f in s.rglob("*") if f.is_file())
+            if s.is_dir()
+            else s.stat().st_size,
+        )
+        for s in sources
+    ]
 
 
 def read_sidecar(storage: Storage, path: str) -> Optional[dict]:
@@ -175,11 +302,17 @@ def is_recording_data(path: str) -> bool:
 
 def summarize(kinds: dict) -> str:
     """e.g. "3 tiff, 1 masknmf-run", most common first."""
-    return ", ".join(f"{n} {kind}" for kind, n in sorted(kinds.items(), key=lambda item: -item[1]))
+    return ", ".join(
+        f"{n} {kind}" for kind, n in sorted(kinds.items(), key=lambda item: -item[1])
+    )
 
 
 def format_time(timestamp: float) -> str:
-    return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M") if timestamp else ""
+    return (
+        datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M")
+        if timestamp
+        else ""
+    )
 
 
 def human_bytes(n: int) -> str:
@@ -207,7 +340,11 @@ def same_line_or_wrap(width: float) -> None:
 def caret_at(text: str, x: float) -> int:
     """The utf-8 offset of the caret x pixels into text, where a click there would put it."""
     n = 0
-    while n < len(text) and imgui.calc_text_size(text[: n + 1]).x - imgui.calc_text_size(text[n]).x / 2 < x:
+    while (
+        n < len(text)
+        and imgui.calc_text_size(text[: n + 1]).x - imgui.calc_text_size(text[n]).x / 2
+        < x
+    ):
         n += 1
     return len(text[:n].encode())
 
@@ -215,23 +352,42 @@ def caret_at(text: str, x: float) -> int:
 def columns_shown(count: int) -> list[int]:
     """The current table's columns left to right as shown, hidden ones left out; the first never moves."""
     table = imgui.internal.get_current_table()
-    rest = [c for c in range(1, count) if imgui.table_get_column_flags(c) & imgui.TableColumnFlags_.is_enabled]
-    return [0, *sorted(rest, key=lambda c: imgui.internal.table_get_cell_bg_rect(table, c).min.x)]
+    rest = [
+        c
+        for c in range(1, count)
+        if imgui.table_get_column_flags(c) & imgui.TableColumnFlags_.is_enabled
+    ]
+    return [
+        0,
+        *sorted(
+            rest, key=lambda c: imgui.internal.table_get_cell_bg_rect(table, c).min.x
+        ),
+    ]
 
 
 def rect_cell(column: int) -> imgui.internal.ImRect:
     """The current row's cell in column, on screen; rows are one line high."""
-    rect = imgui.internal.table_get_cell_bg_rect(imgui.internal.get_current_table(), column)
+    rect = imgui.internal.table_get_cell_bg_rect(
+        imgui.internal.get_current_table(), column
+    )
     height = imgui.get_text_line_height() + 2 * imgui.get_style().cell_padding.y
-    return imgui.internal.ImRect(rect.min.x, rect.min.y, rect.max.x, rect.min.y + height)
+    return imgui.internal.ImRect(
+        rect.min.x, rect.min.y, rect.max.x, rect.min.y + height
+    )
 
 
 def scroll_to_cell(column: int) -> None:
     """Scroll the current table, not the page, until the current row's cell in column shows clear of the frozen header and first column."""
     cell = rect_cell(column)
     first = rect_cell(0).get_width() if column else 0.0
-    rect = imgui.internal.ImRect(cell.min.x - first, cell.min.y - cell.get_height(), cell.max.x, cell.max.y)
-    flags = imgui.internal.ScrollFlags_.keep_visible_edge_x | imgui.internal.ScrollFlags_.keep_visible_edge_y | imgui.internal.ScrollFlags_.no_scroll_parent
+    rect = imgui.internal.ImRect(
+        cell.min.x - first, cell.min.y - cell.get_height(), cell.max.x, cell.max.y
+    )
+    flags = (
+        imgui.internal.ScrollFlags_.keep_visible_edge_x
+        | imgui.internal.ScrollFlags_.keep_visible_edge_y
+        | imgui.internal.ScrollFlags_.no_scroll_parent
+    )
     imgui.internal.scroll_to_rect(imgui.internal.get_current_window(), rect, flags)
 
 
@@ -274,7 +430,9 @@ class Lab4App:
         self.message = ""
         self.failed = False
         self.sources: list[str] = []
-        self.dest = self.settings.destinations[0][0] if self.settings.destinations else ""
+        self.dest = (
+            self.settings.destinations[0][0] if self.settings.destinations else ""
+        )
         # last destination checked and its state: "exists", "new", or an error
         self.dest_checked = ""
         self.dest_state: Optional[str] = None
@@ -299,7 +457,9 @@ class Lab4App:
         self.pending_params = Asap7Params()
         self.jobs = processing.load_jobs()
         self.job_states: dict[str, str] = {}
-        self.path_browse = self.settings.destinations[0][0] if self.settings.destinations else "/"
+        self.path_browse = (
+            self.settings.destinations[0][0] if self.settings.destinations else "/"
+        )
         self.entries: list[Entry] = []
         self.error_browse = ""
         self.selected = ""
@@ -328,7 +488,9 @@ class Lab4App:
         self.rows_slices = {table: self.slices.rows(table) for table in COLUMNS}
         self.filter_slices = {table: "" for table in COLUMNS}
         # sort columns per table, primary first
-        self.sort_slices: dict[str, list[tuple[str, bool]]] = {table: [] for table in COLUMNS}
+        self.sort_slices: dict[str, list[tuple[str, bool]]] = {
+            table: [] for table in COLUMNS
+        }
         self.order_slices: dict[str, list[dict]] = {table: [] for table in COLUMNS}
         self.picked: dict[str, set[int]] = {table: set() for table in COLUMNS}
         self.anchor: dict[str, Optional[int]] = {table: None for table in COLUMNS}
@@ -446,13 +608,23 @@ class Lab4App:
 
     def register(self, path: str) -> None:
         self.message = ""
-        self.submit("register", self.db.register, self.schema, copy.deepcopy(self.recording), path)
+        self.submit(
+            "register",
+            self.db.register,
+            self.schema,
+            copy.deepcopy(self.recording),
+            path,
+        )
 
     def look_up_subject(self) -> None:
         """List the subject's recordings already in Lab4."""
         subject = self.recording.subject_id.strip()
         self.subject_recordings = []
-        if self.db is not None and self.schema is not None and subject in self.schema.subjects:
+        if (
+            self.db is not None
+            and self.schema is not None
+            and subject in self.schema.subjects
+        ):
             self.submit("subject", self.db.recordings, subject)
 
     def load_lab4(self) -> None:
@@ -465,18 +637,32 @@ class Lab4App:
         rows = {"recording": recording}
         for table in ("session", "subject"):
             key = self.schema.key(table, recording)
-            rows[table] = next(row for row in self.lab4[table] if self.schema.key(table, row) == key)
+            rows[table] = next(
+                row for row in self.lab4[table] if self.schema.key(table, row) == key
+            )
         return rows
 
     def pick_lab4(self, recording: dict) -> None:
         """Pick a recording to edit, and look for the sidecar beside its data. Picking it again keeps its edits."""
-        if self.picked_lab4 is not None and self.schema.key("recording", self.picked_lab4["recording"]) == self.schema.key("recording", recording):
+        if self.picked_lab4 is not None and self.schema.key(
+            "recording", self.picked_lab4["recording"]
+        ) == self.schema.key("recording", recording):
             return
         self.picked_lab4 = self.rows_lab4(recording)
-        self.edits_lab4 = {table: {c.name: lab4.text_of(row[c.name]) for c in self.schema.details(table)} for table, row in self.picked_lab4.items()}
+        self.edits_lab4 = {
+            table: {
+                c.name: lab4.text_of(row[c.name]) for c in self.schema.details(table)
+            }
+            for table, row in self.picked_lab4.items()
+        }
         self.injection = {}
         self.sidecar_lab4, self.error_sidecar_lab4 = None, ""
-        self.submit("lab4_sidecar", read_sidecar, self.storage, f"{recording['data_path']}{SIDECAR_SUFFIX}")
+        self.submit(
+            "lab4_sidecar",
+            read_sidecar,
+            self.storage,
+            f"{recording['data_path']}{SIDECAR_SUFFIX}",
+        )
 
     def follow_lab4(self) -> None:
         """
@@ -486,14 +672,25 @@ class Lab4App:
         if self.picked_lab4 is None:
             return
         key = self.schema.key("recording", self.picked_lab4["recording"])
-        recording = next((row for row in self.lab4["recording"] if self.schema.key("recording", row) == key), None)
+        recording = next(
+            (
+                row
+                for row in self.lab4["recording"]
+                if self.schema.key("recording", row) == key
+            ),
+            None,
+        )
         if recording is None:
             self.picked_lab4 = None
             return
         rows = self.rows_lab4(recording)
         for table, fields in self.edits_lab4.items():
             for name, text in fields.items():
-                if self.saved_lab4 or text.strip() == lab4.text_of(self.picked_lab4[table][name]).strip():
+                if (
+                    self.saved_lab4
+                    or text.strip()
+                    == lab4.text_of(self.picked_lab4[table][name]).strip()
+                ):
                     fields[name] = lab4.text_of(rows[table][name])
         self.picked_lab4 = rows
 
@@ -501,7 +698,11 @@ class Lab4App:
         """(table, key, column -> text) for each of the picked recording's rows the edits change."""
         found = []
         for table, row in (self.picked_lab4 or {}).items():
-            changed = {name: text for name, text in self.edits_lab4[table].items() if text.strip() != lab4.text_of(row[name]).strip()}
+            changed = {
+                name: text
+                for name, text in self.edits_lab4[table].items()
+                if text.strip() != lab4.text_of(row[name]).strip()
+            }
             if changed:
                 found.append((table, self.schema.key(table, row), changed))
         return found
@@ -510,11 +711,18 @@ class Lab4App:
         """The picked recording as edited, as the metadata form holds one."""
         edits = self.edits_lab4
         notes = edits["session"].get("session_notes", "")
-        return lab4.Recording.from_lab4({**self.picked_lab4["recording"], **edits["recording"]}, notes, edits["subject"])
+        return lab4.Recording.from_lab4(
+            {**self.picked_lab4["recording"], **edits["recording"]},
+            notes,
+            edits["subject"],
+        )
 
     def moves_data(self) -> bool:
         """Whether the edits change the picked recording's data path."""
-        return self.edits_lab4["recording"].get("data_path", "").strip() != self.picked_lab4["recording"]["data_path"]
+        return (
+            self.edits_lab4["recording"].get("data_path", "").strip()
+            != self.picked_lab4["recording"]["data_path"]
+        )
 
     def sidecar_rewrite(self) -> Optional[tuple[str, str]]:
         """
@@ -526,10 +734,14 @@ class Lab4App:
             return None
         rec = self.recording_lab4()
         rec.extra = [[k, str(v)] for k, v in self.sidecar_lab4.get("extra", {}).items()]
-        text = json.dumps({**self.sidecar_lab4, **rec.sidecar(user=self.user)}, indent=2)
+        text = json.dumps(
+            {**self.sidecar_lab4, **rec.sidecar(user=self.user)}, indent=2
+        )
         return f"{self.picked_lab4['recording']['data_path']}{SIDECAR_SUFFIX}", text
 
-    def save_lab4(self, changes: list[tuple[str, dict, dict]], sidecar: Optional[tuple[str, str]]) -> None:
+    def save_lab4(
+        self, changes: list[tuple[str, dict, dict]], sidecar: Optional[tuple[str, str]]
+    ) -> None:
         """Save the changes to Lab4; poll rewrites the sidecar once they land."""
         self.sidecar_pending = sidecar
         self.submit("lab4_save", self.db.update, self.schema, changes)
@@ -538,17 +750,42 @@ class Lab4App:
         """Why the new injection cannot be added to subject yet."""
         if "lab4_add" in self.futures:
             return ["adding..."]
-        values = {c.name: self.injection.get(c.name, "") for c in self.schema.tables["injection"] if c.name != "subject_id"}
+        values = {
+            c.name: self.injection.get(c.name, "")
+            for c in self.schema.tables["injection"]
+            if c.name != "subject_id"
+        }
         found = self.schema.edit_problems("injection", values)
-        key = self.schema.key("injection", {**{k: v.strip() for k, v in values.items()}, "subject_id": subject})
-        if any({k: lab4.text_of(v) for k, v in self.schema.key("injection", row).items()} == key for row in self.lab4.get("injection", [])):
+        key = self.schema.key(
+            "injection",
+            {**{k: v.strip() for k, v in values.items()}, "subject_id": subject},
+        )
+        if any(
+            {k: lab4.text_of(v) for k, v in self.schema.key("injection", row).items()}
+            == key
+            for row in self.lab4.get("injection", [])
+        ):
             found.append(f"{subject} already has that injection")
         return found
 
     def confirm_injection(self, subject: str) -> None:
         values = {"subject_id": subject, **self.injection}
-        lines = [f"add to Lab4's injections ({self.db.credentials.label()}):", "  " + ", ".join(f"{k.replace('_', ' ')} {v.strip()}" for k, v in values.items() if v.strip())]
-        self.confirm = {"title": "Add to Lab4?", "lines": lines, "button": "Add", "run": self.submit, "args": ("lab4_add", self.db.add, self.schema, "injection", values)}
+        lines = [
+            f"add to Lab4's injections ({self.db.credentials.label()}):",
+            "  "
+            + ", ".join(
+                f"{k.replace('_', ' ')} {v.strip()}"
+                for k, v in values.items()
+                if v.strip()
+            ),
+        ]
+        self.confirm = {
+            "title": "Add to Lab4?",
+            "lines": lines,
+            "button": "Add",
+            "run": self.submit,
+            "args": ("lab4_add", self.db.add, self.schema, "injection", values),
+        }
 
     def show_in_browse(self, path: str) -> None:
         """List path's folder in Browse storage, with path selected."""
@@ -566,9 +803,15 @@ class Lab4App:
         try:
             self.recording = lab4.Recording.from_sidecar(json.loads(self.sidecar))
         except (ValueError, AttributeError) as e:
-            self.message, self.failed = f"cannot read {self.selected}{SIDECAR_SUFFIX}: {e}", True
+            self.message, self.failed = (
+                f"cannot read {self.selected}{SIDECAR_SUFFIX}: {e}",
+                True,
+            )
             return
-        self.message, self.failed = f"the metadata form holds {self.recording.label()}, from {self.selected}{SIDECAR_SUFFIX}", False
+        self.message, self.failed = (
+            f"the metadata form holds {self.recording.label()}, from {self.selected}{SIDECAR_SUFFIX}",
+            False,
+        )
 
     def quit(self) -> None:
         if self.transfer is not None:
@@ -602,12 +845,16 @@ class Lab4App:
         self.submit("list", self.storage.listdir, self.path_browse)
 
     def describe(self) -> None:
-        self.submit("describe", self.catalog.describe, self.storage.label, self.path_browse)
+        self.submit(
+            "describe", self.catalog.describe, self.storage.label, self.path_browse
+        )
 
     def scan(self) -> None:
         """Catalog the browse folder and everything under it."""
         self.count_scanned = 0
-        self.submit("scan", self.catalog.scan, self.storage, self.path_browse, self.count_scan)
+        self.submit(
+            "scan", self.catalog.scan, self.storage, self.path_browse, self.count_scan
+        )
 
     def count_scan(self, n: int) -> None:
         self.count_scanned = n
@@ -615,7 +862,13 @@ class Lab4App:
     def scan_machines(self) -> None:
         """Catalog every root of every machine in Settings, then reload Results."""
         self.errors_scan = []
-        self.submit("scan_machines", scan_machines, self.catalog, copy.deepcopy(self.settings.machines), self.count_machine_scan)
+        self.submit(
+            "scan_machines",
+            scan_machines,
+            self.catalog,
+            copy.deepcopy(self.settings.machines),
+            self.count_machine_scan,
+        )
 
     def count_machine_scan(self, where: str, n: int) -> None:
         self.scanning = (where, n)
@@ -639,7 +892,10 @@ class Lab4App:
         if label == self.storage.label:
             storage = self.storage
         else:
-            storage = next((open_machine(m) for m in self.settings.machines if m["name"] == label), None)
+            storage = next(
+                (open_machine(m) for m in self.settings.machines if m["name"] == label),
+                None,
+            )
         if storage is None:
             self.message, self.failed = f"{label} is not in Settings > Machines", True
             return
@@ -649,7 +905,10 @@ class Lab4App:
             self.message, self.failed = str(e), True
             return
         if local is None:
-            self.message, self.failed = f"{label} is reached over ssh; mount it to open {posixpath.basename(path)}", True
+            self.message, self.failed = (
+                f"{label} is reached over ssh; mount it to open {posixpath.basename(path)}",
+                True,
+            )
         elif not local.exists():
             self.message, self.failed = f"{local} not found; is {label} mounted?", True
         else:
@@ -674,7 +933,9 @@ class Lab4App:
                 os.startfile(local)
                 self.message = f"opened {local.name} in its default app"
             else:
-                subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(local)])
+                subprocess.Popen(
+                    ["open" if sys.platform == "darwin" else "xdg-open", str(local)]
+                )
                 self.message = f"opened {local.name} in its default app"
         except OSError as e:
             self.message = str(e)
@@ -692,7 +953,10 @@ class Lab4App:
             self.message, self.failed = str(e), True
             return
         if local is not None and not local.is_file():
-            self.message, self.failed = f"{local} not found; is the share mounted?", True
+            self.message, self.failed = (
+                f"{local} not found; is the share mounted?",
+                True,
+            )
             return
         if local is not None:
             self.open_local(local=local, kind=kind)
@@ -709,10 +973,24 @@ class Lab4App:
         ]
         if cached.exists():
             lines.append("The cached copy is replaced.")
-        self.confirm = {"title": "Copy to this machine?", "lines": lines, "button": "Copy and open", "run": self.start_fetch, "args": (remote, cached, kind, size)}
+        self.confirm = {
+            "title": "Copy to this machine?",
+            "lines": lines,
+            "button": "Copy and open",
+            "run": self.start_fetch,
+            "args": (remote, cached, kind, size),
+        }
 
-    def start_fetch(self, remote: str, cached: Path, kind: Optional[str], size: int) -> None:
-        self.fetch = {"remote": remote, "local": cached, "kind": kind, "done": 0, "total": size}
+    def start_fetch(
+        self, remote: str, cached: Path, kind: Optional[str], size: int
+    ) -> None:
+        self.fetch = {
+            "remote": remote,
+            "local": cached,
+            "kind": kind,
+            "done": 0,
+            "total": size,
+        }
         self.submit("download", download, self.storage, remote, cached, self.fetch)
 
     def send(self, transfer: Transfer, pending: list[Job], params: Asap7Params) -> None:
@@ -748,13 +1026,31 @@ class Lab4App:
             exact, _, whole = term.partition("=")
             column, _, value = term.partition(":")
             if whole and exact in names:
-                rows = [r for r in rows if r[exact] is not None and str(r[exact]).lower() == whole]
+                rows = [
+                    r
+                    for r in rows
+                    if r[exact] is not None and str(r[exact]).lower() == whole
+                ]
             elif value and column in names:
-                rows = [r for r in rows if r[column] is not None and value in str(r[column]).lower()]
+                rows = [
+                    r
+                    for r in rows
+                    if r[column] is not None and value in str(r[column]).lower()
+                ]
             else:
-                rows = [r for r in rows if any(r[n] is not None and term in str(r[n]).lower() for n in names)]
+                rows = [
+                    r
+                    for r in rows
+                    if any(
+                        r[n] is not None and term in str(r[n]).lower() for n in names
+                    )
+                ]
         for column, ascending in reversed(self.sort_slices[table]):
-            filled = sorted((r for r in rows if r[column] is not None), key=lambda r: r[column], reverse=not ascending)
+            filled = sorted(
+                (r for r in rows if r[column] is not None),
+                key=lambda r: r[column],
+                reverse=not ascending,
+            )
             rows = filled + [r for r in rows if r[column] is None]
         self.order_slices[table] = rows
         self.picked[table] &= {r["id"] for r in rows}
@@ -766,7 +1062,9 @@ class Lab4App:
             self.rows_slices[table] = self.slices.rows(table)
             self.order_rows(table=table)
 
-    def files_of(self, table: str, row: Optional[dict], slice_: Optional[dict]) -> tuple[list[dict], set[str], str]:
+    def files_of(
+        self, table: str, row: Optional[dict], slice_: Optional[dict]
+    ) -> tuple[list[dict], set[str], str]:
         """The picked row's files, the paths its patient's slices claim, and a heading; cached until anything changes."""
         key = (self.version_rows, table, None if row is None else row["id"])
         if self.cache_files[0] == key:
@@ -776,17 +1074,35 @@ class Lab4App:
         heading = ""
         if slice_ is not None:
             files = match_files(self.files_index, slice_["file_match"] or "")
-            heading = f"{len(files)} files match {slice_['file_match']}" if slice_["file_match"] else "no file_match set"
+            heading = (
+                f"{len(files)} files match {slice_['file_match']}"
+                if slice_["file_match"]
+                else "no file_match set"
+            )
         elif row is not None and row["collection_date"]:
             for s in self.rows_slices["slices"]:
                 if s["patient_id"] == row["patient_id"]:
-                    claimed |= {f["path"] for f in match_files(self.files_index, s["file_match"] or "")}
-            files = [f for f in self.files_index if row["collection_date"] in file_dates(f["path"])]
+                    claimed |= {
+                        f["path"]
+                        for f in match_files(self.files_index, s["file_match"] or "")
+                    }
+            files = [
+                f
+                for f in self.files_index
+                if row["collection_date"] in file_dates(f["path"])
+            ]
             heading = f"{len(files)} files dated {row['collection_date']}, {sum(f['path'] not in claimed for f in files)} matching no slice"
         self.cache_files = (key, (files, claimed, heading))
         return files, claimed, heading
 
-    def start_edit(self, table: str, row: dict, column: int, seed: Optional[str] = None, x_click: Optional[float] = None) -> None:
+    def start_edit(
+        self,
+        table: str,
+        row: dict,
+        column: int,
+        seed: Optional[str] = None,
+        x_click: Optional[float] = None,
+    ) -> None:
         """
         Edit a cell, or say in the footer why it cannot be edited. seed replaces its text, as typing over a cell in
         Excel does; otherwise the caret goes where the cell was double-clicked (x_click), or at the end. A choice cell
@@ -794,11 +1110,17 @@ class Lab4App:
         """
         name, kind, _ = COLUMNS[table][column]
         if kind == "joined":
-            self.message, self.failed = f"{name} comes from the patient; edit it on Patients", True
+            self.message, self.failed = (
+                f"{name} comes from the patient; edit it on Patients",
+                True,
+            )
         elif kind == "owner":
             self.message, self.failed = "owner cannot be changed", True
         elif not can_edit(row["owner"], self.user_slices):
-            self.message, self.failed = f"this row is {row['owner']}'s; {locked(row['owner'])}", True
+            self.message, self.failed = (
+                f"this row is {row['owner']}'s; {locked(row['owner'])}",
+                True,
+            )
         else:
             self.cell = self.editing = (table, row["id"], name)
             self.text_before = "" if row[name] is None else str(row[name])
@@ -835,7 +1157,11 @@ class Lab4App:
         column = names.index(self.cell[2])
         at = shown.index(column) if column in shown else 0
         id_ = ids[min(max(ids.index(self.cell[1]) + rows, 0), len(ids) - 1)]
-        self.cell = (table, id_, names[shown[min(max(at + columns, 0), len(shown) - 1)]])
+        self.cell = (
+            table,
+            id_,
+            names[shown[min(max(at + columns, 0), len(shown) - 1)]],
+        )
         self.picked[table].clear()
         self.picked[table].add(id_)
         self.anchor[table] = id_
@@ -846,24 +1172,44 @@ class Lab4App:
         Excel's keys on the outlined cell, unless a widget or popup has them: arrows, Tab and Enter move it (Shift goes
         back), F2 edits it, Delete or Backspace edits it empty, typing replaces it, and Escape lets it go.
         """
-        if self.cell is None or self.editing is not None or imgui.is_any_item_active() or imgui.is_popup_open("", imgui.PopupFlags_.any_popup_id):
+        if (
+            self.cell is None
+            or self.editing is not None
+            or imgui.is_any_item_active()
+            or imgui.is_popup_open("", imgui.PopupFlags_.any_popup_id)
+        ):
             return
         if not imgui.is_window_focused(imgui.FocusedFlags_.root_and_child_windows):
             return
         names = [name for name, _, _ in COLUMNS[table]]
-        row = next((r for r in self.order_slices[table] if r["id"] == self.cell[1]), None)
+        row = next(
+            (r for r in self.order_slices[table] if r["id"] == self.cell[1]), None
+        )
         if row is None or names.index(self.cell[2]) not in self.shown_slices:
             self.cell = None
             return
         io = imgui.get_io()
         back = -1 if io.key_shift else 1
         moves = {
-            imgui.Key.up_arrow: (-1, 0), imgui.Key.down_arrow: (1, 0), imgui.Key.left_arrow: (0, -1), imgui.Key.right_arrow: (0, 1),
-            imgui.Key.tab: (0, back), imgui.Key.enter: (back, 0), imgui.Key.keypad_enter: (back, 0),
+            imgui.Key.up_arrow: (-1, 0),
+            imgui.Key.down_arrow: (1, 0),
+            imgui.Key.left_arrow: (0, -1),
+            imgui.Key.right_arrow: (0, 1),
+            imgui.Key.tab: (0, back),
+            imgui.Key.enter: (back, 0),
+            imgui.Key.keypad_enter: (back, 0),
         }
-        move = next((step for key, step in moves.items() if imgui.is_key_pressed(key)), None)
+        move = next(
+            (step for key, step in moves.items() if imgui.is_key_pressed(key)), None
+        )
         # Ctrl drops typed characters, as imgui's text boxes do, except with Alt for AltGr
-        typed = "" if (io.key_ctrl and not io.key_alt) or io.key_super else "".join(chr(c) for c in io.input_queue_characters if c >= 32 and c != 127)
+        typed = (
+            ""
+            if (io.key_ctrl and not io.key_alt) or io.key_super
+            else "".join(
+                chr(c) for c in io.input_queue_characters if c >= 32 and c != 127
+            )
+        )
         column = names.index(self.cell[2])
         if imgui.is_key_pressed(imgui.Key.escape):
             self.cell = None
@@ -871,7 +1217,10 @@ class Lab4App:
             self.move_cell(table, *move)
         elif imgui.is_key_pressed(imgui.Key.f2):
             self.start_edit(table, row, column)
-        elif not io.key_ctrl and (imgui.is_key_pressed(imgui.Key.delete) or imgui.is_key_pressed(imgui.Key.backspace)):
+        elif not io.key_ctrl and (
+            imgui.is_key_pressed(imgui.Key.delete)
+            or imgui.is_key_pressed(imgui.Key.backspace)
+        ):
             self.start_edit(table, row, column, seed="")
         elif typed:
             self.start_edit(table, row, column, seed=typed)
@@ -885,14 +1234,18 @@ class Lab4App:
         """
         if imgui.internal.get_active_id() != imgui.get_id(label):
             io = imgui.get_io()
-            self.chars_held += "".join(chr(c) for c in io.input_queue_characters if c >= 32 and c != 127)
+            self.chars_held += "".join(
+                chr(c) for c in io.input_queue_characters if c >= 32 and c != 127
+            )
             io.input_queue_characters.clear()
 
     def place_caret(self, data: imgui.InputTextCallbackData) -> int:
         """When an edit box opens, put the caret at caret_edit, else at the end, with nothing selected, and add what was held."""
         if data.event_activated:
             end = data.buf_text_len
-            data.cursor_pos = data.selection_start = data.selection_end = end if self.caret_edit is None else min(self.caret_edit, end)
+            data.cursor_pos = data.selection_start = data.selection_end = (
+                end if self.caret_edit is None else min(self.caret_edit, end)
+            )
             if self.chars_held:
                 data.insert_chars(data.cursor_pos, self.chars_held)
             self.caret_edit, self.chars_held = None, ""
@@ -905,38 +1258,71 @@ class Lab4App:
         """
         em = imgui.get_font_size()
         table, _, name = self.editing
-        _, kind, choices = next(column for column in COLUMNS[table] if column[0] == name)
+        _, kind, choices = next(
+            column for column in COLUMNS[table] if column[0] == name
+        )
         # a choice cell can be cleared; a ref cell cannot
-        options = [r[name] for r in self.rows_slices[choices]] if kind == "ref" else ["", *choices]
-        width = max(12 * em, self.rect_choice.get_width() if self.rect_choice else 0.0, *(imgui.calc_text_size(o).x + 2 * em for o in options))
+        options = (
+            [r[name] for r in self.rows_slices[choices]]
+            if kind == "ref"
+            else ["", *choices]
+        )
+        width = max(
+            12 * em,
+            self.rect_choice.get_width() if self.rect_choice else 0.0,
+            *(imgui.calc_text_size(o).x + 2 * em for o in options),
+        )
         if imgui.is_window_appearing():
             imgui.set_keyboard_focus_here()
         self.hold_chars("##filter_choice")
         imgui.set_next_item_width(width)
-        _, self.filter_choice = imgui.input_text_with_hint("##filter_choice", "type to filter", self.filter_choice, imgui.InputTextFlags_.callback_always, self.place_caret)
+        _, self.filter_choice = imgui.input_text_with_hint(
+            "##filter_choice",
+            "type to filter",
+            self.filter_choice,
+            imgui.InputTextFlags_.callback_always,
+            self.place_caret,
+        )
         typed = self.filter_choice.strip().lower()
         shown = [o for o in options if typed in (o or "(none)").lower()]
         if imgui.is_item_edited() or self.pick_choice not in shown:
-            self.pick_choice = next((o for o in shown if (o or "(none)").lower().startswith(typed)), shown[0] if shown else None)
-        step = int(imgui.is_key_pressed(imgui.Key.down_arrow)) - int(imgui.is_key_pressed(imgui.Key.up_arrow))
+            self.pick_choice = next(
+                (o for o in shown if (o or "(none)").lower().startswith(typed)),
+                shown[0] if shown else None,
+            )
+        step = int(imgui.is_key_pressed(imgui.Key.down_arrow)) - int(
+            imgui.is_key_pressed(imgui.Key.up_arrow)
+        )
         if step and self.pick_choice in shown:
-            self.pick_choice = shown[min(max(shown.index(self.pick_choice) + step, 0), len(shown) - 1)]
+            self.pick_choice = shown[
+                min(max(shown.index(self.pick_choice) + step, 0), len(shown) - 1)
+            ]
         clicked = None
-        with imgui_ctx.begin_child("##options", imgui.ImVec2(width, max(min(len(shown), 12), 1) * imgui.get_text_line_height_with_spacing())):
+        with imgui_ctx.begin_child(
+            "##options",
+            imgui.ImVec2(
+                width,
+                max(min(len(shown), 12), 1) * imgui.get_text_line_height_with_spacing(),
+            ),
+        ):
             if not shown:
                 imgui.text_disabled("no match")
             for option in shown:
                 # the value there now stands out
                 if option == self.text_before:
                     imgui.push_style_color(imgui.Col_.text, ACCENT)
-                if imgui.selectable(f"{option or '(none)'}##{option}", option == self.pick_choice)[0]:
+                if imgui.selectable(
+                    f"{option or '(none)'}##{option}", option == self.pick_choice
+                )[0]:
                     clicked = option
                 if option == self.text_before:
                     imgui.pop_style_color()
                 if step and option == self.pick_choice:
                     imgui.set_scroll_here_y()
         back = -1 if imgui.get_io().key_shift else 1
-        enter = imgui.is_key_pressed(imgui.Key.enter) or imgui.is_key_pressed(imgui.Key.keypad_enter)
+        enter = imgui.is_key_pressed(imgui.Key.enter) or imgui.is_key_pressed(
+            imgui.Key.keypad_enter
+        )
         tab = imgui.is_key_pressed(imgui.Key.tab)
         if imgui.is_key_pressed(imgui.Key.escape):
             self.editing = None
@@ -952,7 +1338,11 @@ class Lab4App:
         self.sidecar = ""
         names = {e.name for e in self.entries}
         if f"{name}{SIDECAR_SUFFIX}" in names:
-            self.submit("sidecar", self.storage.read_text, f"{self.path_browse.rstrip('/')}/{name}{SIDECAR_SUFFIX}")
+            self.submit(
+                "sidecar",
+                self.storage.read_text,
+                f"{self.path_browse.rstrip('/')}/{name}{SIDECAR_SUFFIX}",
+            )
 
     def poll(self) -> None:
         """Handle finished workers and file dialogs."""
@@ -963,7 +1353,10 @@ class Lab4App:
             error = future.exception()
             if name == "mounts":
                 self.mounts = [] if error is not None else future.result()
-                unset = self.settings.backend == "mounted" and not self.settings.mount_root.strip()
+                unset = (
+                    self.settings.backend == "mounted"
+                    and not self.settings.mount_root.strip()
+                )
                 if unset and len(self.mounts) == 1:
                     self.use_mount(self.mounts[0])
                 elif unset and not self.mounts and not self.detected:
@@ -988,7 +1381,9 @@ class Lab4App:
             elif name == "lab4_rows":
                 if error is None:
                     self.lab4 = future.result()
-                    self.registered = {row["data_path"]: row for row in self.lab4["recording"]}
+                    self.registered = {
+                        row["data_path"]: row for row in self.lab4["recording"]
+                    }
                     self.follow_lab4()
                 else:
                     self.message, self.failed = f"cannot read Lab4: {error}", True
@@ -1001,8 +1396,15 @@ class Lab4App:
                 if error is None:
                     self.message = "saved to Lab4"
                     if self.sidecar_pending is not None:
-                        self.message += f"; rewriting {posixpath.basename(self.sidecar_pending[0])}"
-                        self.submit("lab4_rewrite", write_text, self.storage, *self.sidecar_pending)
+                        self.message += (
+                            f"; rewriting {posixpath.basename(self.sidecar_pending[0])}"
+                        )
+                        self.submit(
+                            "lab4_rewrite",
+                            write_text,
+                            self.storage,
+                            *self.sidecar_pending,
+                        )
                     self.saved_lab4 = True
                     self.load_lab4()
                 else:
@@ -1010,12 +1412,25 @@ class Lab4App:
                 self.sidecar_pending = None
             elif name == "lab4_rewrite":
                 self.failed = error is not None
-                self.message = "saved to Lab4 and rewrote the sidecar" if error is None else f"saved to Lab4, but rewriting the sidecar failed: {error}"
+                self.message = (
+                    "saved to Lab4 and rewrote the sidecar"
+                    if error is None
+                    else f"saved to Lab4, but rewriting the sidecar failed: {error}"
+                )
                 if self.picked_lab4 is not None:
-                    self.submit("lab4_sidecar", read_sidecar, self.storage, f"{self.picked_lab4['recording']['data_path']}{SIDECAR_SUFFIX}")
+                    self.submit(
+                        "lab4_sidecar",
+                        read_sidecar,
+                        self.storage,
+                        f"{self.picked_lab4['recording']['data_path']}{SIDECAR_SUFFIX}",
+                    )
             elif name == "lab4_add":
                 self.failed = error is not None
-                self.message = "added the injection to Lab4" if error is None else f"adding failed: {error}"
+                self.message = (
+                    "added the injection to Lab4"
+                    if error is None
+                    else f"adding failed: {error}"
+                )
                 if error is None:
                     self.injection = {}
                     self.load_lab4()
@@ -1023,8 +1438,14 @@ class Lab4App:
                 self.subject_recordings = [] if error is not None else future.result()
             elif name == "register":
                 if error is None:
-                    added = [table.replace("_", " ") for table, new in future.result().items() if new and table != "recording"]
-                    self.message = f"registered {self.recording.label()} in Lab4" + (f", with a new {', '.join(added)}" if added else "")
+                    added = [
+                        table.replace("_", " ")
+                        for table, new in future.result().items()
+                        if new and table != "recording"
+                    ]
+                    self.message = f"registered {self.recording.label()} in Lab4" + (
+                        f", with a new {', '.join(added)}" if added else ""
+                    )
                     self.submit("refresh", self.db.schema)
                 else:
                     self.message = f"registering failed: {error}"
@@ -1041,7 +1462,11 @@ class Lab4App:
                 self.described = future.result()
             elif name == "scan":
                 found = None if error is not None else future.result()
-                self.message = f"scan failed: {error}" if found is None else f"scanned {found['root']}: {found['datasets']} datasets in {found['records']} items ({found['seconds']:.1f} s)"
+                self.message = (
+                    f"scan failed: {error}"
+                    if found is None
+                    else f"scanned {found['root']}: {found['datasets']} datasets in {found['records']} items ({found['seconds']:.1f} s)"
+                )
                 self.failed = found is None
                 self.describe()
                 # its runs and results show on Results once linked
@@ -1049,9 +1474,15 @@ class Lab4App:
             elif name == "link":
                 self.watched = 0.0
             elif name == "scan_machines":
-                found, self.errors_scan = ([], [str(error)]) if error is not None else future.result()
+                found, self.errors_scan = (
+                    ([], [str(error)]) if error is not None else future.result()
+                )
                 runs = sum(scan["runs"] for scan in found)
-                self.message = f"scanned {len(found)} folder(s), {runs} runs" + (f"; {len(self.errors_scan)} not reachable" if self.errors_scan else "")
+                self.message = f"scanned {len(found)} folder(s), {runs} runs" + (
+                    f"; {len(self.errors_scan)} not reachable"
+                    if self.errors_scan
+                    else ""
+                )
                 self.failed = bool(self.errors_scan) and not found
                 self.scanning = ("", 0)
                 self.watched = 0.0
@@ -1059,7 +1490,10 @@ class Lab4App:
                 if error is None:
                     self.overview = future.result()
                 else:
-                    self.message, self.failed = f"cannot read the catalog: {error}", True
+                    self.message, self.failed = (
+                        f"cannot read the catalog: {error}",
+                        True,
+                    )
             elif name == "files_index":
                 if error is None:
                     self.files_index, self.indexed = future.result()
@@ -1071,7 +1505,10 @@ class Lab4App:
                 if error is None:
                     self.confirm_send(future.result())
                 else:
-                    self.message, self.failed = f"cannot read the sources: {error}", True
+                    self.message, self.failed = (
+                        f"cannot read the sources: {error}",
+                        True,
+                    )
             elif name == "download":
                 if error is None:
                     self.open_local(local=self.fetch["local"], kind=self.fetch["kind"])
@@ -1081,19 +1518,37 @@ class Lab4App:
             elif name == "sidecar":
                 self.sidecar = "" if error is not None else future.result()
             elif name == "attach":
-                self.message = f"metadata attached to {self.selected}" if error is None else f"attach failed: {error}"
+                self.message = (
+                    f"metadata attached to {self.selected}"
+                    if error is None
+                    else f"attach failed: {error}"
+                )
                 self.failed = error is not None
                 self.submit("list", self.storage.listdir, self.path_browse)
             elif name == "transfer":
-                self.message = f"sent {len(self.transfer.sources)} item(s) to {self.transfer.dest}" if error is None else str(error)
+                self.message = (
+                    f"sent {len(self.transfer.sources)} item(s) to {self.transfer.dest}"
+                    if error is None
+                    else str(error)
+                )
                 self.failed = error is not None
                 self.dest_checked = ""
                 if error is None:
                     self.transfer = None
                     self.browse(path=self.path_browse)
                 if error is None and self.pending:
-                    self.message += f"; submitting {len(self.pending)} processing job(s)"
-                    self.submit("process", processing.submit, self.run_remote, copy.deepcopy(self.settings), self.pending, self.pending_params, self.storage)
+                    self.message += (
+                        f"; submitting {len(self.pending)} processing job(s)"
+                    )
+                    self.submit(
+                        "process",
+                        processing.submit,
+                        self.run_remote,
+                        copy.deepcopy(self.settings),
+                        self.pending,
+                        self.pending_params,
+                        self.storage,
+                    )
                 else:
                     self.pending = []
             elif name == "process":
@@ -1108,7 +1563,12 @@ class Lab4App:
                 self.pending = []
             elif name == "mesc":
                 self.mesc = [] if error is not None else future.result()
-                keys = {(local, unit.key) for local, _, units in self.mesc if isinstance(units, list) for unit in units}
+                keys = {
+                    (local, unit.key)
+                    for local, _, units in self.mesc
+                    if isinstance(units, list)
+                    for unit in units
+                }
                 self.chosen &= keys
             elif name == "states":
                 self.job_states = {} if error is not None else future.result()
@@ -1119,7 +1579,11 @@ class Lab4App:
                 if self.dest_checked == self.destination():
                     self.dest_state = state
             elif name == "picker":
-                self.picker_entries = [] if error is not None else [e for e in future.result() if e.is_dir]
+                self.picker_entries = (
+                    []
+                    if error is not None
+                    else [e for e in future.result() if e.is_dir]
+                )
                 self.picker_error = "" if error is None else str(error)
         if self.saver is not None and self.saver.ready():
             chosen = self.saver.result()
@@ -1131,7 +1595,10 @@ class Lab4App:
                 except OSError as e:
                     self.message, self.failed = str(e), True
                 else:
-                    self.message, self.failed = f"wrote {len(self.rows_slices[table])} {table} to {chosen}", False
+                    self.message, self.failed = (
+                        f"wrote {len(self.rows_slices[table])} {table} to {chosen}",
+                        False,
+                    )
         if self.picker is not None and self.picker.ready():
             chosen = self.picker.result()
             chosen = chosen if isinstance(chosen, list) else [chosen]
@@ -1161,7 +1628,11 @@ class Lab4App:
             if not isinstance(units, list):
                 continue
             mesc = f"{dest}/{relative}"
-            jobs += [Job(local, mesc, unit.key, processing.dir_save(mesc, unit.key, when)) for unit in units if (local, unit.key) in self.chosen]
+            jobs += [
+                Job(local, mesc, unit.key, processing.dir_save(mesc, unit.key, when))
+                for unit in units
+                if (local, unit.key) in self.chosen
+            ]
         return jobs
 
     def submit_waiting(self) -> None:
@@ -1169,7 +1640,14 @@ class Lab4App:
         waiting = [job for job in self.jobs if job["job_id"] is None]
         if waiting and "process" not in self.futures:
             self.message = ""
-            self.submit("process", processing.submit_waiting, self.run_remote, copy.deepcopy(self.settings), waiting, self.storage)
+            self.submit(
+                "process",
+                processing.submit_waiting,
+                self.run_remote,
+                copy.deepcopy(self.settings),
+                waiting,
+                self.storage,
+            )
 
     def check_jobs(self) -> None:
         ids = [job["job_id"] for job in self.jobs[-NUMBER_JOBS_SHOWN:]]
@@ -1183,7 +1661,9 @@ class Lab4App:
         if folders:
             self.picker = pfd.select_folder("Add folder", start)
         else:
-            self.picker = pfd.open_file("Add files", start, ["All Files", "*"], pfd.opt.multiselect)
+            self.picker = pfd.open_file(
+                "Add files", start, ["All Files", "*"], pfd.opt.multiselect
+            )
 
     def destination(self) -> str:
         """The destination folder, without a trailing slash."""
@@ -1193,7 +1673,11 @@ class Lab4App:
     def check_destination(self) -> None:
         """Check the destination once each time it changes."""
         dest = self.destination()
-        if dest.startswith("/") and dest != self.dest_checked and "dest_check" not in self.futures:
+        if (
+            dest.startswith("/")
+            and dest != self.dest_checked
+            and "dest_check" not in self.futures
+        ):
             self.dest_checked = dest
             self.dest_state = None
             self.submit("dest_check", destination_state, self.storage, dest)
@@ -1206,8 +1690,17 @@ class Lab4App:
     def open_destination_picker(self) -> None:
         """Open the picker at the destination, or at its parent when it is new."""
         dest = self.destination()
-        start = dest if self.dest_state == "exists" else posixpath.dirname(dest) if dest.startswith("/") else ""
-        self.list_picker(start or (self.settings.destinations[0][0] if self.settings.destinations else "/"))
+        start = (
+            dest
+            if self.dest_state == "exists"
+            else posixpath.dirname(dest)
+            if dest.startswith("/")
+            else ""
+        )
+        self.list_picker(
+            start
+            or (self.settings.destinations[0][0] if self.settings.destinations else "/")
+        )
         self.picker_open = True
 
     def problems(self) -> list[str]:
@@ -1227,7 +1720,9 @@ class Lab4App:
             if not dest:
                 found.append("choose a destination folder")
             elif not dest.startswith("/"):
-                found.append("destination must be a BioHPC path, e.g. /biohpc/data2/M231")
+                found.append(
+                    "destination must be a BioHPC path, e.g. /biohpc/data2/M231"
+                )
             elif self.dest_checked != dest or self.dest_state is None:
                 found.append("checking destination...")
             elif self.dest_state not in ("exists", "new"):
@@ -1276,7 +1771,11 @@ class Lab4App:
     def label_action(self) -> Optional[str]:
         if self.page == "transfer":
             label = f"{fa.ICON_FA_CLOUD_ARROW_UP}  Send {len(self.sources)} item{'' if len(self.sources) == 1 else 's'}"
-            return label + (f", process {len(self.chosen)} unit{'' if len(self.chosen) == 1 else 's'}" if self.process else "")
+            return label + (
+                f", process {len(self.chosen)} unit{'' if len(self.chosen) == 1 else 's'}"
+                if self.process
+                else ""
+            )
         if self.page == "browse":
             return f"{fa.ICON_FA_TAGS}  Attach metadata"
         if self.page == "recordings":
@@ -1301,12 +1800,26 @@ class Lab4App:
         else:
             lines.append("Stops if any of these already exist.")
         lines.append("Local files are only read.")
-        transfer = Transfer(self.storage, [source for source, _ in sized], dest, metadata, self.overwrite)
+        transfer = Transfer(
+            self.storage,
+            [source for source, _ in sized],
+            dest,
+            metadata,
+            self.overwrite,
+        )
         pending = self.jobs_to_send() if self.process else []
         if pending:
-            lines.append(f"Then submits {len(pending)} processing job(s) on {self.settings.partition}.")
+            lines.append(
+                f"Then submits {len(pending)} processing job(s) on {self.settings.partition}."
+            )
         args = (transfer, pending, copy.deepcopy(self.params))
-        self.confirm = {"title": "Send to BioHPC?", "lines": lines, "button": "Send", "run": self.send, "args": args}
+        self.confirm = {
+            "title": "Send to BioHPC?",
+            "lines": lines,
+            "button": "Send",
+            "run": self.send,
+            "args": args,
+        }
 
     def act(self) -> None:
         self.message = ""
@@ -1315,24 +1828,50 @@ class Lab4App:
             self.submit("sizes", measure, [Path(s) for s in self.sources])
         elif self.page == "browse":
             path = f"{self.path_browse.rstrip('/')}/{self.selected}{SIDECAR_SUFFIX}"
-            text = json.dumps({**self.recording.sidecar(user=self.user), "source": f"{self.path_browse.rstrip('/')}/{self.selected}"}, indent=2)
-            lines = [f"write {path}", f"on {self.storage.label}. {self.selected} is not changed."]
+            text = json.dumps(
+                {
+                    **self.recording.sidecar(user=self.user),
+                    "source": f"{self.path_browse.rstrip('/')}/{self.selected}",
+                },
+                indent=2,
+            )
+            lines = [
+                f"write {path}",
+                f"on {self.storage.label}. {self.selected} is not changed.",
+            ]
             if f"{self.selected}{SIDECAR_SUFFIX}" in {e.name for e in self.entries}:
                 lines.append("The existing sidecar is replaced.")
-            self.confirm = {"title": "Attach metadata?", "lines": lines, "button": "Write", "run": self.submit, "args": ("attach", write_text, self.storage, path, text)}
+            self.confirm = {
+                "title": "Attach metadata?",
+                "lines": lines,
+                "button": "Write",
+                "run": self.submit,
+                "args": ("attach", write_text, self.storage, path, text),
+            }
         elif self.page == "recordings":
             changes = self.changes_lab4()
             lines = [f"change in Lab4 ({self.db.credentials.label()}):"]
             for table, _, values in changes:
                 row = self.picked_lab4[table]
-                lines += [f"  {table} {name.replace('_', ' ')}: {lab4.text_of(row[name])!r} -> {text.strip()!r}" for name, text in values.items()]
+                lines += [
+                    f"  {table} {name.replace('_', ' ')}: {lab4.text_of(row[name])!r} -> {text.strip()!r}"
+                    for name, text in values.items()
+                ]
             shared = [table for table, _, _ in changes if table != "recording"]
             if shared:
-                lines.append(f"Every recording of this {' and '.join(shared)} shows the change.")
+                lines.append(
+                    f"Every recording of this {' and '.join(shared)} shows the change."
+                )
             sidecar = self.sidecar_rewrite()
             if sidecar is not None:
                 lines.append(f"then rewrite {sidecar[0]} on {self.storage.label}")
-            self.confirm = {"title": "Save to Lab4?", "lines": lines, "button": "Save", "run": self.save_lab4, "args": (changes, sidecar)}
+            self.confirm = {
+                "title": "Save to Lab4?",
+                "lines": lines,
+                "button": "Save",
+                "run": self.save_lab4,
+                "args": (changes, sidecar),
+            }
         elif self.page == "settings":
             self.settings.save()
             self.connect()
@@ -1340,7 +1879,11 @@ class Lab4App:
         elif self.page == "slices" and self.saver is None:
             # the save dialog asks before overwriting
             self.table_export = self.tab_slices
-            self.saver = pfd.save_file(f"Export {self.tab_slices}", str(Path.home() / f"{self.tab_slices}.csv"), ["CSV", "*.csv"])
+            self.saver = pfd.save_file(
+                f"Export {self.tab_slices}",
+                str(Path.home() / f"{self.tab_slices}.csv"),
+                ["CSV", "*.csv"],
+            )
 
     def draw_header(self) -> None:
         """Name, version, user and storage status."""
@@ -1355,7 +1898,10 @@ class Lab4App:
         if self.user:
             if self.status is None:
                 color, state = DIM, "checking"
-            elif self.settings.backend == "mounted" and not self.settings.mount_root.strip():
+            elif (
+                self.settings.backend == "mounted"
+                and not self.settings.mount_root.strip()
+            ):
                 color, state = WARN, "not set up"
             elif self.status:
                 color, state = ERROR, "unreachable"
@@ -1367,8 +1913,15 @@ class Lab4App:
             imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + max(0.0, room))
             imgui.text_colored(color, text)
             if imgui.is_item_hovered():
-                lab = f"Lab4: {self.db.credentials.label()}" if self.db else "Lab4: offline"
-                idl.wrapped_tooltip(f"{lab}\n{self.storage.label}" + (f": {self.status}" if self.status else ""))
+                lab = (
+                    f"Lab4: {self.db.credentials.label()}"
+                    if self.db
+                    else "Lab4: offline"
+                )
+                idl.wrapped_tooltip(
+                    f"{lab}\n{self.storage.label}"
+                    + (f": {self.status}" if self.status else "")
+                )
         draw_wrapped("Move PML data to BioHPC with Lab4 metadata", DIM)
 
     def draw_body(self) -> None:
@@ -1378,24 +1931,49 @@ class Lab4App:
             self.draw_login()
             return
         outlined = self.page == "slices" and self.cell is not None
-        if imgui.is_key_pressed(imgui.Key.escape) and not imgui.is_any_item_active() and not imgui.is_popup_open("", imgui.PopupFlags_.any_popup_id) and not outlined:
+        if (
+            imgui.is_key_pressed(imgui.Key.escape)
+            and not imgui.is_any_item_active()
+            and not imgui.is_popup_open("", imgui.PopupFlags_.any_popup_id)
+            and not outlined
+        ):
             self.page = "home"
         em = imgui.get_font_size()
         avail = imgui.get_content_region_avail()
         dl = imgui.get_window_draw_list()
         p = imgui.get_cursor_screen_pos()
-        with imgui_ctx.begin_child("##rail", imgui.ImVec2(WIDTH_RAIL_EM * em, avail.y), 0, imgui.WindowFlags_.no_scrollbar):
+        with imgui_ctx.begin_child(
+            "##rail",
+            imgui.ImVec2(WIDTH_RAIL_EM * em, avail.y),
+            0,
+            imgui.WindowFlags_.no_scrollbar,
+        ):
             self.draw_rail()
         x = p.x + WIDTH_RAIL_EM * em + 0.4 * em
-        dl.add_line(imgui.ImVec2(x, p.y), imgui.ImVec2(x, p.y + avail.y), imgui.color_convert_float4_to_u32(EDGE), 1.0)
+        dl.add_line(
+            imgui.ImVec2(x, p.y),
+            imgui.ImVec2(x, p.y + avail.y),
+            imgui.color_convert_float4_to_u32(EDGE),
+            1.0,
+        )
         imgui.same_line(0, 0.8 * em)
-        imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(1.2 * em, 0.6 * em))
-        with imgui_ctx.begin_child("##content", imgui.ImVec2(0, avail.y), imgui.ChildFlags_.always_use_window_padding):
+        imgui.push_style_var(
+            imgui.StyleVar_.window_padding, imgui.ImVec2(1.2 * em, 0.6 * em)
+        )
+        with imgui_ctx.begin_child(
+            "##content",
+            imgui.ImVec2(0, avail.y),
+            imgui.ChildFlags_.always_use_window_padding,
+        ):
             self.draw_content()
         imgui.pop_style_var()
         if self.confirm is not None and not imgui.is_popup_open("###confirm"):
             imgui.open_popup("###confirm")
-        if imgui.begin_popup_modal(f"{self.confirm['title'] if self.confirm else ''}###confirm", None, imgui.WindowFlags_.always_auto_resize)[0]:
+        if imgui.begin_popup_modal(
+            f"{self.confirm['title'] if self.confirm else ''}###confirm",
+            None,
+            imgui.WindowFlags_.always_auto_resize,
+        )[0]:
             if self.confirm is None:
                 imgui.close_current_popup()
             else:
@@ -1408,7 +1986,11 @@ class Lab4App:
                 imgui.same_line()
                 if go:
                     self.confirm["run"](*self.confirm["args"])
-                if go or imgui.button("Cancel", imgui.ImVec2(8 * em, 0)) or imgui.is_key_pressed(imgui.Key.escape):
+                if (
+                    go
+                    or imgui.button("Cancel", imgui.ImVec2(8 * em, 0))
+                    or imgui.is_key_pressed(imgui.Key.escape)
+                ):
                     self.confirm = None
                     imgui.close_current_popup()
             imgui.end_popup()
@@ -1422,9 +2004,17 @@ class Lab4App:
         imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + max(0.0, (avail - width) / 2))
         imgui.push_style_color(imgui.Col_.child_bg, CARD)
         imgui.push_style_var(imgui.StyleVar_.child_rounding, 8.0)
-        imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(1.2 * em, 1.0 * em))
-        flags = imgui.ChildFlags_.borders | imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.always_use_window_padding
-        with imgui_ctx.begin_child("##login", imgui.ImVec2(width, 0), flags, imgui.WindowFlags_.no_scrollbar):
+        imgui.push_style_var(
+            imgui.StyleVar_.window_padding, imgui.ImVec2(1.2 * em, 1.0 * em)
+        )
+        flags = (
+            imgui.ChildFlags_.borders
+            | imgui.ChildFlags_.auto_resize_y
+            | imgui.ChildFlags_.always_use_window_padding
+        )
+        with imgui_ctx.begin_child(
+            "##login", imgui.ImVec2(width, 0), flags, imgui.WindowFlags_.no_scrollbar
+        ):
             idl.center_text(f"{fa.ICON_FA_LOCK}  Lab4 · BioHPC sign in", ACCENT)
             idl.center_text("move data, attach metadata, register recordings", DIM)
             imgui.dummy(imgui.ImVec2(0, 0.3 * em))
@@ -1435,7 +2025,10 @@ class Lab4App:
             imgui.text_colored(DIM, f"{fa.ICON_FA_KEY}  Credentials")
             draw_wrapped(str(path), PATH if path.is_file() else ERROR)
             if not path.is_file():
-                draw_wrapped("Download your credentials from the Lab4 workspace and save them here.", DIM)
+                draw_wrapped(
+                    "Download your credentials from the Lab4 workspace and save them here.",
+                    DIM,
+                )
             else:
                 try:
                     credentials = Credentials.load(path)
@@ -1443,14 +2036,23 @@ class Lab4App:
                     draw_wrapped(f"unreadable: {e}", ERROR)
                 else:
                     local = credentials.host in ("127.0.0.1", "localhost", "::1")
-                    draw_wrapped(f"signs in as {credentials.label()}" + ("" if local else "  (remote server)"), DIM if local else WARN)
+                    draw_wrapped(
+                        f"signs in as {credentials.label()}"
+                        + ("" if local else "  (remote server)"),
+                        DIM if local else WARN,
+                    )
             if self.error_login:
-                draw_wrapped(f"{fa.ICON_FA_CIRCLE_EXCLAMATION}  {self.error_login}", ERROR)
+                draw_wrapped(
+                    f"{fa.ICON_FA_CIRCLE_EXCLAMATION}  {self.error_login}", ERROR
+                )
             imgui.dummy(imgui.ImVec2(0, 0.4 * em))
             signing_in = "sign_in" in self.futures
             imgui.begin_disabled(signing_in or not path.is_file())
             idl.push_button_style(THEME, primary=True)
-            if imgui.button("Signing in..." if signing_in else "Sign In", imgui.ImVec2(full, 1.9 * em)):
+            if imgui.button(
+                "Signing in..." if signing_in else "Sign In",
+                imgui.ImVec2(full, 1.9 * em),
+            ):
                 self.sign_in()
             idl.pop_button_style()
             imgui.end_disabled()
@@ -1459,7 +2061,9 @@ class Lab4App:
                 self.work_offline()
             imgui.end_disabled()
             if imgui.is_item_hovered():
-                idl.wrapped_tooltip("transfers and sidecars work without Lab4; registering does not")
+                idl.wrapped_tooltip(
+                    "transfers and sidecars work without Lab4; registering does not"
+                )
         imgui.pop_style_var(2)
         imgui.pop_style_color()
 
@@ -1472,10 +2076,14 @@ class Lab4App:
         for key, icon, name, hint in PAGES:
             lit = key == self.page
             imgui.push_style_color(imgui.Col_.button, LIT if lit else CLEAR)
-            imgui.push_style_color(imgui.Col_.button_hovered, LIT if lit else CARD_HOVER)
+            imgui.push_style_color(
+                imgui.Col_.button_hovered, LIT if lit else CARD_HOVER
+            )
             imgui.push_style_color(imgui.Col_.button_active, LIT)
             imgui.push_style_color(imgui.Col_.text, ACCENT if lit else TEXT)
-            if imgui.button(f"{icon}   {name}##rail_{key}", imgui.ImVec2(width, 2.2 * em)):
+            if imgui.button(
+                f"{icon}   {name}##rail_{key}", imgui.ImVec2(width, 2.2 * em)
+            ):
                 self.page = key
             imgui.pop_style_color(4)
             if imgui.is_item_hovered():
@@ -1490,7 +2098,10 @@ class Lab4App:
             imgui.push_style_color(imgui.Col_.button_active, LIT)
             imgui.push_style_color(imgui.Col_.text, DIM)
             for i, path in enumerate(recent):
-                if imgui.button(f"{fa.ICON_FA_CLOCK_ROTATE_LEFT}  {Path(path).name or path}##recent_{i}", imgui.ImVec2(width, 1.7 * em)):
+                if imgui.button(
+                    f"{fa.ICON_FA_CLOCK_ROTATE_LEFT}  {Path(path).name or path}##recent_{i}",
+                    imgui.ImVec2(width, 1.7 * em),
+                ):
                     self.page = "transfer"
                     if path not in self.sources:
                         self.sources.append(path)
@@ -1534,7 +2145,11 @@ class Lab4App:
         dl.add_circle_filled(center, r, imgui.color_convert_float4_to_u32(LIT))
         dl.add_circle(center, r, imgui.color_convert_float4_to_u32(ACCENT), 0, 1.0)
         size = imgui.calc_text_size(str(n))
-        dl.add_text(imgui.ImVec2(center.x - size.x / 2, center.y - size.y / 2), imgui.color_convert_float4_to_u32(ACCENT), str(n))
+        dl.add_text(
+            imgui.ImVec2(center.x - size.x / 2, center.y - size.y / 2),
+            imgui.color_convert_float4_to_u32(ACCENT),
+            str(n),
+        )
         imgui.dummy(imgui.ImVec2(2 * r, 2 * r))
         imgui.same_line(0, 0.6 * em)
         imgui.set_cursor_pos_y(imgui.get_cursor_pos_y() + 0.25 * em)
@@ -1544,9 +2159,15 @@ class Lab4App:
 
     def begin_form(self, name: str) -> bool:
         """Start a two-column form (caption, widget); close it with end_table."""
-        if not imgui.begin_table(f"##form_{name}", 2, imgui.TableFlags_.sizing_stretch_prop):
+        if not imgui.begin_table(
+            f"##form_{name}", 2, imgui.TableFlags_.sizing_stretch_prop
+        ):
             return False
-        imgui.table_setup_column("##caption", imgui.TableColumnFlags_.width_fixed, WIDTH_CAPTION_EM * imgui.get_font_size())
+        imgui.table_setup_column(
+            "##caption",
+            imgui.TableColumnFlags_.width_fixed,
+            WIDTH_CAPTION_EM * imgui.get_font_size(),
+        )
         imgui.table_setup_column("##widget", imgui.TableColumnFlags_.width_stretch)
         return True
 
@@ -1570,10 +2191,16 @@ class Lab4App:
         if not items:
             return imgui.input_text_with_hint(label, hint, value)[1]
         spacing = imgui.get_style().item_inner_spacing.x
-        imgui.set_next_item_width(imgui.get_content_region_avail().x - imgui.get_frame_height() - spacing)
+        imgui.set_next_item_width(
+            imgui.get_content_region_avail().x - imgui.get_frame_height() - spacing
+        )
         _, value = imgui.input_text_with_hint(label, hint, value)
         imgui.same_line(0, spacing)
-        if imgui.begin_combo(f"{label}_pick", "", imgui.ComboFlags_.no_preview | imgui.ComboFlags_.popup_align_left):
+        if imgui.begin_combo(
+            f"{label}_pick",
+            "",
+            imgui.ComboFlags_.no_preview | imgui.ComboFlags_.popup_align_left,
+        ):
             for item in items:
                 if imgui.selectable(item, item == value)[0]:
                     value = item
@@ -1583,12 +2210,20 @@ class Lab4App:
     def lookup(self, label: str, value: str, column: str, hint: str) -> str:
         """A combo over the column's Lab4 lookup values, or a text field offline."""
         items = self.schema.choices.get(column, []) if self.schema else []
-        return self.choice(label, value, items) if items else imgui.input_text_with_hint(label, hint, value)[1]
+        return (
+            self.choice(label, value, items)
+            if items
+            else imgui.input_text_with_hint(label, hint, value)[1]
+        )
 
     def draw_home(self) -> None:
         """Page cards, links, destinations and the files a transfer writes."""
         em = imgui.get_font_size()
-        pages = [page for page in PAGES if page[0] in ("transfer", "browse", "recordings", "results", "slices")]
+        pages = [
+            page
+            for page in PAGES
+            if page[0] in ("transfer", "browse", "recordings", "results", "slices")
+        ]
         i = draw_cards([(icon, name, hint) for key, icon, name, hint in pages])
         if i is not None:
             self.page = pages[i][0]
@@ -1603,7 +2238,9 @@ class Lab4App:
         imgui.dummy(imgui.ImVec2(0, 0.6 * em))
         imgui.text_colored(ACCENT, f"{fa.ICON_FA_LINK}  Links")
         draw_hint("opens in your browser")
-        i = draw_cards([(icon, name, f"{hint}\n{url}") for icon, name, url, hint in LINKS])
+        i = draw_cards(
+            [(icon, name, f"{hint}\n{url}") for icon, name, url, hint in LINKS]
+        )
         if i is not None:
             webbrowser.open(LINKS[i][2])
         flags = imgui.TableFlags_.row_bg | imgui.TableFlags_.borders_inner_h
@@ -1611,7 +2248,9 @@ class Lab4App:
         imgui.text_colored(ACCENT, f"{fa.ICON_FA_FOLDER_OPEN}  Destinations")
         draw_hint("edit these in Settings")
         if imgui.begin_table("##destinations", 2, flags):
-            imgui.table_setup_column("path", imgui.TableColumnFlags_.width_fixed, 15 * em)
+            imgui.table_setup_column(
+                "path", imgui.TableColumnFlags_.width_fixed, 15 * em
+            )
             imgui.table_setup_column("holds", imgui.TableColumnFlags_.width_stretch)
             for path, description in self.settings.destinations:
                 imgui.table_next_row()
@@ -1623,7 +2262,9 @@ class Lab4App:
         imgui.dummy(imgui.ImVec2(0, 0.6 * em))
         imgui.text_colored(ACCENT, f"{fa.ICON_FA_FILE}  Files written")
         if imgui.begin_table("##files", 2, flags):
-            imgui.table_setup_column("file", imgui.TableColumnFlags_.width_fixed, 15 * em)
+            imgui.table_setup_column(
+                "file", imgui.TableColumnFlags_.width_fixed, 15 * em
+            )
             imgui.table_setup_column("holds", imgui.TableColumnFlags_.width_stretch)
             for name, text in FILES:
                 imgui.table_next_row()
@@ -1660,17 +2301,31 @@ class Lab4App:
         imgui.end_disabled()
 
         imgui.dummy(imgui.ImVec2(0, 0.6 * em))
-        self.step(2, "Destination", "a BioHPC folder; a new one is made when its parent exists")
+        self.step(
+            2,
+            "Destination",
+            "a BioHPC folder; a new one is made when its parent exists",
+        )
         self.check_destination()
         dest = self.destination()
         spacing = imgui.get_style().item_inner_spacing.x
         label_browse = f"{fa.ICON_FA_FOLDER_OPEN}  Browse..."
-        imgui.set_next_item_width(imgui.get_content_region_avail().x - imgui.calc_text_size(label_browse).x - 2 * imgui.get_style().frame_padding.x - spacing)
-        _, self.dest = imgui.input_text_with_hint("##dest", "/biohpc/data2/... (new folders are made)", self.dest)
+        imgui.set_next_item_width(
+            imgui.get_content_region_avail().x
+            - imgui.calc_text_size(label_browse).x
+            - 2 * imgui.get_style().frame_padding.x
+            - spacing
+        )
+        _, self.dest = imgui.input_text_with_hint(
+            "##dest", "/biohpc/data2/... (new folders are made)", self.dest
+        )
         imgui.same_line(0, spacing)
         if imgui.button(label_browse):
             self.open_destination_picker()
-        presets = {path.rstrip("/"): description for path, description in self.settings.destinations}
+        presets = {
+            path.rstrip("/"): description
+            for path, description in self.settings.destinations
+        }
         if not dest:
             draw_wrapped("type a BioHPC folder or browse for one", DIM)
         elif not dest.startswith("/") or self.dest_checked != dest:
@@ -1678,7 +2333,11 @@ class Lab4App:
         elif self.dest_state is None:
             imgui.text_disabled("checking...")
         elif self.dest_state == "exists":
-            draw_wrapped(f"{fa.ICON_FA_FOLDER}  goes to {dest}" + (f"  ·  {presets[dest]}" if dest in presets else ""), PATH)
+            draw_wrapped(
+                f"{fa.ICON_FA_FOLDER}  goes to {dest}"
+                + (f"  ·  {presets[dest]}" if dest in presets else ""),
+                PATH,
+            )
         elif self.dest_state == "new":
             parent, name = posixpath.split(dest)
             draw_wrapped(f"{fa.ICON_FA_PLUS}  makes {name} in {parent or '/'}", ACCENT)
@@ -1694,7 +2353,9 @@ class Lab4App:
         _, self.overwrite = imgui.checkbox("Overwrite existing files", self.overwrite)
 
         imgui.dummy(imgui.ImVec2(0, 0.6 * em))
-        self.step(4, "Processing", "run the ASAP7 spine pipeline on BioHPC after the transfer")
+        self.step(
+            4, "Processing", "run the ASAP7 spine pipeline on BioHPC after the transfer"
+        )
         _, self.process = imgui.checkbox("Process .mesc units overnight", self.process)
         if self.process:
             self.draw_processing()
@@ -1729,19 +2390,35 @@ class Lab4App:
                 draw_wrapped(units, ERROR)
                 continue
             runnable = [u for u in units if processing.is_runnable(u, self.params)]
-            flags = imgui.TableFlags_.row_bg | imgui.TableFlags_.borders_inner_h | imgui.TableFlags_.sizing_stretch_prop
+            flags = (
+                imgui.TableFlags_.row_bg
+                | imgui.TableFlags_.borders_inner_h
+                | imgui.TableFlags_.sizing_stretch_prop
+            )
             if runnable and imgui.begin_table(f"##units_{local}", 5, flags):
-                imgui.table_setup_column("##pick", imgui.TableColumnFlags_.width_fixed, 1.6 * em)
-                imgui.table_setup_column("unit", imgui.TableColumnFlags_.width_fixed, 11 * em)
-                imgui.table_setup_column("frames", imgui.TableColumnFlags_.width_fixed, 5 * em)
-                imgui.table_setup_column("length", imgui.TableColumnFlags_.width_fixed, 8 * em)
-                imgui.table_setup_column("comment", imgui.TableColumnFlags_.width_stretch)
+                imgui.table_setup_column(
+                    "##pick", imgui.TableColumnFlags_.width_fixed, 1.6 * em
+                )
+                imgui.table_setup_column(
+                    "unit", imgui.TableColumnFlags_.width_fixed, 11 * em
+                )
+                imgui.table_setup_column(
+                    "frames", imgui.TableColumnFlags_.width_fixed, 5 * em
+                )
+                imgui.table_setup_column(
+                    "length", imgui.TableColumnFlags_.width_fixed, 8 * em
+                )
+                imgui.table_setup_column(
+                    "comment", imgui.TableColumnFlags_.width_stretch
+                )
                 imgui.table_headers_row()
                 for unit in runnable:
                     key = (local, unit.key)
                     imgui.table_next_row()
                     imgui.table_next_column()
-                    ticked, on = imgui.checkbox(f"##{local}_{unit.key}", key in self.chosen)
+                    ticked, on = imgui.checkbox(
+                        f"##{local}_{unit.key}", key in self.chosen
+                    )
                     if ticked:
                         self.chosen = self.chosen | {key} if on else self.chosen - {key}
                     imgui.table_next_column()
@@ -1755,24 +2432,39 @@ class Lab4App:
                 imgui.end_table()
             hidden = len(units) - len(runnable)
             if hidden:
-                imgui.text_disabled(f"{hidden} unit(s) hidden: not a movie, or too few frames")
-        self.subsection("Pipeline", "mbo asap7 (asap7_spine_pipeline_detrend.ipynb); defaults match the notebook")
+                imgui.text_disabled(
+                    f"{hidden} unit(s) hidden: not a movie, or too few frames"
+                )
+        self.subsection(
+            "Pipeline",
+            "mbo asap7 (asap7_spine_pipeline_detrend.ipynb); defaults match the notebook",
+        )
         params = self.params
         if self.begin_form("asap7"):
             self.row("channel")
             _, params.channel = imgui.input_int("##channel", params.channel)
             self.row("first frame")
-            _, params.first_frame = imgui.input_int("##first_frame", params.first_frame, 50)
+            _, params.first_frame = imgui.input_int(
+                "##first_frame", params.first_frame, 50
+            )
             self.row("MAD threshold")
-            _, params.mad_correlation_threshold = imgui.input_float("##mad", params.mad_correlation_threshold, 0.05, 0.1, "%.2f")
+            _, params.mad_correlation_threshold = imgui.input_float(
+                "##mad", params.mad_correlation_threshold, 0.05, 0.1, "%.2f"
+            )
             self.row("detrend window")
-            _, params.detrend_window_s = imgui.input_float("##detrend", params.detrend_window_s, 0.05, 0.1, "%.2f s")
+            _, params.detrend_window_s = imgui.input_float(
+                "##detrend", params.detrend_window_s, 0.05, 0.1, "%.2f s"
+            )
             imgui.end_table()
         partition = self.settings.partition or "(no partition set)"
         draw_wrapped(
             f"One job per unit on {partition} via ssh {self.settings.processing_host}, after the transfer finishes. "
             f"Results go to <folder>/{processing.NAME_RESULTS}/<unit>_detrend_<time> beside the .mesc."
-            + (f" Emails {self.settings.email} when each ends." if self.settings.email else ""),
+            + (
+                f" Emails {self.settings.email} when each ends."
+                if self.settings.email
+                else ""
+            ),
             DIM,
         )
 
@@ -1781,7 +2473,10 @@ class Lab4App:
         if not self.jobs:
             return
         em = imgui.get_font_size()
-        self.subsection("Submitted", f"last {NUMBER_JOBS_SHOWN} jobs from this machine, newest first")
+        self.subsection(
+            "Submitted",
+            f"last {NUMBER_JOBS_SHOWN} jobs from this machine, newest first",
+        )
         imgui.same_line()
         imgui.begin_disabled("states" in self.futures)
         if imgui.small_button(f"{fa.ICON_FA_ARROWS_ROTATE}  Check"):
@@ -1790,15 +2485,25 @@ class Lab4App:
         waiting = sum(job["job_id"] is None for job in self.jobs)
         if waiting:
             imgui.same_line()
-            imgui.begin_disabled("process" in self.futures or not self.settings.partition.strip())
+            imgui.begin_disabled(
+                "process" in self.futures or not self.settings.partition.strip()
+            )
             if imgui.small_button(f"{fa.ICON_FA_PLAY}  Submit {waiting} waiting"):
                 self.submit_waiting()
             imgui.end_disabled()
-        flags = imgui.TableFlags_.row_bg | imgui.TableFlags_.borders_inner_h | imgui.TableFlags_.sizing_stretch_prop
+        flags = (
+            imgui.TableFlags_.row_bg
+            | imgui.TableFlags_.borders_inner_h
+            | imgui.TableFlags_.sizing_stretch_prop
+        )
         if imgui.begin_table("##jobs", 4, flags):
             imgui.table_setup_column("job", imgui.TableColumnFlags_.width_fixed, 5 * em)
-            imgui.table_setup_column("unit", imgui.TableColumnFlags_.width_fixed, 11 * em)
-            imgui.table_setup_column("state", imgui.TableColumnFlags_.width_fixed, 10 * em)
+            imgui.table_setup_column(
+                "unit", imgui.TableColumnFlags_.width_fixed, 11 * em
+            )
+            imgui.table_setup_column(
+                "state", imgui.TableColumnFlags_.width_fixed, 10 * em
+            )
             imgui.table_setup_column("results", imgui.TableColumnFlags_.width_stretch)
             for job in reversed(self.jobs[-NUMBER_JOBS_SHOWN:]):
                 imgui.table_next_row()
@@ -1807,13 +2512,27 @@ class Lab4App:
                 imgui.table_next_column()
                 imgui.text(job["unit"])
                 imgui.table_next_column()
-                state = self.job_states.get(job["job_id"], "") if job["job_id"] else "waiting to submit"
-                color = OK if state.startswith("COMPLETED") else ERROR if state.split(" ")[0] in STATES_FAILED else WARN if not job["job_id"] else TEXT
+                state = (
+                    self.job_states.get(job["job_id"], "")
+                    if job["job_id"]
+                    else "waiting to submit"
+                )
+                color = (
+                    OK
+                    if state.startswith("COMPLETED")
+                    else ERROR
+                    if state.split(" ")[0] in STATES_FAILED
+                    else WARN
+                    if not job["job_id"]
+                    else TEXT
+                )
                 imgui.text_colored(color, state or "not checked")
                 imgui.table_next_column()
                 imgui.text_disabled(job["dir_save"])
                 if imgui.is_item_hovered():
-                    idl.wrapped_tooltip(f"{job['mesc']}\nchosen {job['chosen_at']}, submitted {job['submitted_at'] or 'not yet'}")
+                    idl.wrapped_tooltip(
+                        f"{job['mesc']}\nchosen {job['chosen_at']}, submitted {job['submitted_at'] or 'not yet'}"
+                    )
             imgui.end_table()
 
     def subsection(self, title: str, hint: str) -> None:
@@ -1828,7 +2547,9 @@ class Lab4App:
         if self.picker_open:
             imgui.open_popup(TITLE_PICKER)
             self.picker_open = False
-        imgui.set_next_window_size(imgui.ImVec2(44 * em, 28 * em), imgui.Cond_.appearing)
+        imgui.set_next_window_size(
+            imgui.ImVec2(44 * em, 28 * em), imgui.Cond_.appearing
+        )
         if not imgui.begin_popup_modal(TITLE_PICKER, None)[0]:
             return
         for path, description in self.settings.destinations:
@@ -1842,7 +2563,9 @@ class Lab4App:
             self.list_picker(posixpath.dirname(self.picker_path) or "/")
         imgui.same_line()
         imgui.set_next_item_width(-1)
-        entered, self.picker_path = imgui.input_text("##picker_path", self.picker_path, imgui.InputTextFlags_.enter_returns_true)
+        entered, self.picker_path = imgui.input_text(
+            "##picker_path", self.picker_path, imgui.InputTextFlags_.enter_returns_true
+        )
         if entered:
             self.list_picker(self.picker_path)
         if "picker" in self.futures:
@@ -1850,17 +2573,31 @@ class Lab4App:
         elif self.picker_error:
             draw_wrapped(self.picker_error, ERROR)
         flags_row = imgui.SelectableFlags_.allow_double_click
-        if imgui.begin_child("##picker_list", imgui.ImVec2(0, -2.4 * em), imgui.ChildFlags_.borders):
+        if imgui.begin_child(
+            "##picker_list", imgui.ImVec2(0, -2.4 * em), imgui.ChildFlags_.borders
+        ):
             for entry in self.picker_entries:
-                clicked, _ = imgui.selectable(f"{fa.ICON_FA_FOLDER}  {entry.name}", entry.name == self.picker_selected, flags_row)
+                clicked, _ = imgui.selectable(
+                    f"{fa.ICON_FA_FOLDER}  {entry.name}",
+                    entry.name == self.picker_selected,
+                    flags_row,
+                )
                 if clicked:
                     self.picker_selected = entry.name
                 if clicked and imgui.is_mouse_double_clicked(imgui.MouseButton_.left):
                     self.list_picker(f"{self.picker_path.rstrip('/')}/{entry.name}")
-            if not self.picker_entries and "picker" not in self.futures and not self.picker_error:
+            if (
+                not self.picker_entries
+                and "picker" not in self.futures
+                and not self.picker_error
+            ):
                 imgui.text_disabled("no folders here")
         imgui.end_child()
-        chosen = f"{self.picker_path.rstrip('/')}/{self.picker_selected}" if self.picker_selected else self.picker_path
+        chosen = (
+            f"{self.picker_path.rstrip('/')}/{self.picker_selected}"
+            if self.picker_selected
+            else self.picker_path
+        )
         idl.push_button_style(THEME, primary=True)
         if imgui.button(f"Use {chosen}"):
             self.dest = chosen
@@ -1881,19 +2618,35 @@ class Lab4App:
         self.subsection("Recording", "the Lab4 key: group, subject, session, device")
         if self.begin_form("key"):
             self.row("experimenter")
-            rec.experimenter = self.lookup("##experimenter", rec.experimenter, "experimenter", "full name")
+            rec.experimenter = self.lookup(
+                "##experimenter", rec.experimenter, "experimenter", "full name"
+            )
             self.row("experiment group")
             groups = schema.groups_of(rec.experimenter.strip()) if schema else []
-            rec.collection_name = self.pick("##group", rec.collection_name, groups, "study or cohort; new ones are added")
+            rec.collection_name = self.pick(
+                "##group",
+                rec.collection_name,
+                groups,
+                "study or cohort; new ones are added",
+            )
             self.row("subject")
             subject_before = rec.subject_id
-            rec.subject_id = self.pick("##subject", rec.subject_id, schema.subjects if schema else [], "mouse id")
+            rec.subject_id = self.pick(
+                "##subject",
+                rec.subject_id,
+                schema.subjects if schema else [],
+                "mouse id",
+            )
             if rec.subject_id != subject_before:
                 self.look_up_subject()
             self.row("session start")
-            _, rec.session_datetime = imgui.input_text_with_hint("##when", "YYYY-MM-DD HH:MM", rec.session_datetime)
+            _, rec.session_datetime = imgui.input_text_with_hint(
+                "##when", "YYYY-MM-DD HH:MM", rec.session_datetime
+            )
             self.row("device")
-            rec.device_name = self.lookup("##device", rec.device_name, "device_name", "rig")
+            rec.device_name = self.lookup(
+                "##device", rec.device_name, "device_name", "rig"
+            )
             imgui.end_table()
         problems = rec.problems() + (schema.problems(rec) if schema else [])
         for problem in problems:
@@ -1902,27 +2655,53 @@ class Lab4App:
             draw_wrapped("offline: not checked against Lab4", DIM)
         elif rec.subject_id.strip() in schema.subjects:
             n = len(self.subject_recordings)
-            draw_wrapped(f"{rec.subject_id.strip()} is in Lab4 with {n} recording{'' if n == 1 else 's'}", DIM)
+            draw_wrapped(
+                f"{rec.subject_id.strip()} is in Lab4 with {n} recording{'' if n == 1 else 's'}",
+                DIM,
+            )
             for row in self.subject_recordings[:5]:
-                imgui.text_disabled(f"    {row['session_datetime']}  {row['device_name']}  {row['data_path']}")
+                imgui.text_disabled(
+                    f"    {row['session_datetime']}  {row['device_name']}  {row['data_path']}"
+                )
 
         self.subsection("Details", "saved with the recording")
         if self.begin_form("details"):
             self.row("label")
-            _, rec.ui_label = imgui.input_text_with_hint("##label", "optional", rec.ui_label)
+            _, rec.ui_label = imgui.input_text_with_hint(
+                "##label", "optional", rec.ui_label
+            )
             self.row("weight (g)")
-            _, rec.weight_g = imgui.input_text_with_hint("##weight", "optional", rec.weight_g)
+            _, rec.weight_g = imgui.input_text_with_hint(
+                "##weight", "optional", rec.weight_g
+            )
             self.row("notes")
-            _, rec.notes = imgui.input_text_multiline("##notes", rec.notes, imgui.ImVec2(-1, 3.5 * em))
+            _, rec.notes = imgui.input_text_multiline(
+                "##notes", rec.notes, imgui.ImVec2(-1, 3.5 * em)
+            )
             imgui.end_table()
 
-        if schema is not None and rec.subject_id.strip() and rec.subject_id.strip() not in schema.subjects and schema.subject_fields():
-            self.subsection("New subject", f"{rec.subject_id.strip()} is new; registering adds it")
+        if (
+            schema is not None
+            and rec.subject_id.strip()
+            and rec.subject_id.strip() not in schema.subjects
+            and schema.subject_fields()
+        ):
+            self.subsection(
+                "New subject", f"{rec.subject_id.strip()} is new; registering adds it"
+            )
             if self.begin_form("subject"):
                 for column in schema.subject_fields():
-                    self.row(column.name.replace("_", " ") + ("" if column.required else " (optional)"))
+                    self.row(
+                        column.name.replace("_", " ")
+                        + ("" if column.required else " (optional)")
+                    )
                     value = rec.subject_fields.get(column.name, "")
-                    rec.subject_fields[column.name] = self.pick(f"##subject_{column.name}", value, schema.choices.get(column.name, []), "YYYY-MM-DD" if column.type == "date" else "")
+                    rec.subject_fields[column.name] = self.pick(
+                        f"##subject_{column.name}",
+                        value,
+                        schema.choices.get(column.name, []),
+                        "YYYY-MM-DD" if column.type == "date" else "",
+                    )
                 imgui.end_table()
 
         self.subsection("Extra fields", "extra key/value pairs, sidecar only")
@@ -1942,12 +2721,19 @@ class Lab4App:
             rec.extra.append(["", ""])
 
         imgui.dummy(imgui.ImVec2(0, 0.3 * em))
-        if not imgui.tree_node(f"{fa.ICON_FA_FILE_CODE}  sidecar preview: {rec.label()}{SIDECAR_SUFFIX}###sidecar_preview"):
+        if not imgui.tree_node(
+            f"{fa.ICON_FA_FILE_CODE}  sidecar preview: {rec.label()}{SIDECAR_SUFFIX}###sidecar_preview"
+        ):
             return
         text = json.dumps(rec.sidecar(user=self.user), indent=2)
         lines = text.count("\n") + 1
         imgui.push_style_color(imgui.Col_.text, CODE)
-        imgui.input_text_multiline("##preview", text, imgui.ImVec2(-1, lines * imgui.get_text_line_height() + em), imgui.InputTextFlags_.read_only)
+        imgui.input_text_multiline(
+            "##preview",
+            text,
+            imgui.ImVec2(-1, lines * imgui.get_text_line_height() + em),
+            imgui.InputTextFlags_.read_only,
+        )
         imgui.pop_style_color()
         imgui.tree_pop()
 
@@ -1970,35 +2756,67 @@ class Lab4App:
             idl.wrapped_tooltip("index this folder and its subfolders for datasets")
         imgui.same_line()
         imgui.set_next_item_width(-1)
-        entered, self.path_browse = imgui.input_text("##path", self.path_browse, imgui.InputTextFlags_.enter_returns_true)
+        entered, self.path_browse = imgui.input_text(
+            "##path", self.path_browse, imgui.InputTextFlags_.enter_returns_true
+        )
         if entered:
             self.browse(path=self.path_browse)
 
-        summary, scan, items = self.described["folder"], self.described["scan"], self.described["items"]
+        summary, scan, items = (
+            self.described["folder"],
+            self.described["scan"],
+            self.described["items"],
+        )
         if scanning:
-            imgui.text_colored(ACCENT, f"scanning {self.path_browse}... {self.count_scanned} items listed")
+            imgui.text_colored(
+                ACCENT,
+                f"scanning {self.path_browse}... {self.count_scanned} items listed",
+            )
         elif scan is None:
             imgui.text_disabled("not scanned yet")
         else:
             kinds = summary["kinds"] if summary else {}
-            below = f"{sum(kinds.values())} datasets below: {summarize(kinds)}" if kinds else "no datasets below"
-            size = f" · {human_bytes(summary['size'])} in {summary['n_files']} files" if summary else ""
-            imgui.text_disabled(f"scanned {scan['scanned_at'].replace('T', ' ')} · {below}{size}")
+            below = (
+                f"{sum(kinds.values())} datasets below: {summarize(kinds)}"
+                if kinds
+                else "no datasets below"
+            )
+            size = (
+                f" · {human_bytes(summary['size'])} in {summary['n_files']} files"
+                if summary
+                else ""
+            )
+            imgui.text_disabled(
+                f"scanned {scan['scanned_at'].replace('T', ' ')} · {below}{size}"
+            )
         if "list" in self.futures:
             imgui.text_disabled("listing...")
         elif self.error_browse:
             draw_wrapped(self.error_browse, ERROR)
 
         names = {e.name for e in self.entries}
-        flags = imgui.TableFlags_.row_bg | imgui.TableFlags_.borders_inner_h | imgui.TableFlags_.scroll_y | imgui.TableFlags_.resizable
+        flags = (
+            imgui.TableFlags_.row_bg
+            | imgui.TableFlags_.borders_inner_h
+            | imgui.TableFlags_.scroll_y
+            | imgui.TableFlags_.resizable
+        )
         height = max(8 * em, imgui.get_content_region_avail().y - 12 * em)
         if imgui.begin_table("##entries", 5, flags, imgui.ImVec2(0, height)):
             imgui.table_setup_scroll_freeze(0, 1)
             imgui.table_setup_column("name", imgui.TableColumnFlags_.width_stretch, 2.0)
-            imgui.table_setup_column("kind", imgui.TableColumnFlags_.width_fixed, 8 * em)
-            imgui.table_setup_column("holds", imgui.TableColumnFlags_.width_stretch, 1.5)
-            imgui.table_setup_column("size", imgui.TableColumnFlags_.width_fixed, 5 * em)
-            imgui.table_setup_column("##tag", imgui.TableColumnFlags_.width_fixed, 3 * em)
+            imgui.table_setup_column(
+                "kind", imgui.TableColumnFlags_.width_fixed, 8 * em
+            )
+            imgui.table_setup_column(
+                "holds", imgui.TableColumnFlags_.width_stretch, 1.5
+            )
+            imgui.table_setup_column(
+                "size", imgui.TableColumnFlags_.width_fixed, 5 * em
+            )
+            imgui.table_setup_column(
+                "##tag", imgui.TableColumnFlags_.width_fixed, 3 * em
+            )
             imgui.table_headers_row()
             for entry in self.entries:
                 item = items.get(entry.name, {})
@@ -2009,8 +2827,13 @@ class Lab4App:
                 sidecar = entry.name.endswith(SIDECAR_SUFFIX)
                 if sidecar or kind is not None:
                     imgui.push_style_color(imgui.Col_.text, DIM if sidecar else KEY)
-                flags_row = imgui.SelectableFlags_.span_all_columns | imgui.SelectableFlags_.allow_double_click
-                clicked, _ = imgui.selectable(f"{icon}  {entry.name}", entry.name == self.selected, flags_row)
+                flags_row = (
+                    imgui.SelectableFlags_.span_all_columns
+                    | imgui.SelectableFlags_.allow_double_click
+                )
+                clicked, _ = imgui.selectable(
+                    f"{icon}  {entry.name}", entry.name == self.selected, flags_row
+                )
                 if sidecar or kind is not None:
                     imgui.pop_style_color()
                 if clicked:
@@ -2032,7 +2855,9 @@ class Lab4App:
                 size = item.get("size", 0 if entry.is_dir else entry.size)
                 imgui.text_disabled(human_bytes(size) if size else "")
                 imgui.table_next_column()
-                registered = self.registered.get(f"{self.path_browse.rstrip('/')}/{entry.name}")
+                registered = self.registered.get(
+                    f"{self.path_browse.rstrip('/')}/{entry.name}"
+                )
                 if f"{entry.name}{SIDECAR_SUFFIX}" in names:
                     imgui.text_colored(OK, fa.ICON_FA_TAGS)
                     if imgui.is_item_hovered():
@@ -2042,7 +2867,9 @@ class Lab4App:
                 if registered is not None:
                     imgui.text_colored(ACCENT, fa.ICON_FA_DATABASE)
                     if imgui.is_item_hovered():
-                        idl.wrapped_tooltip(f"in Lab4: {registered['subject_id']}, {lab4.text_of(registered['session_datetime'])}, {registered['device_name']}")
+                        idl.wrapped_tooltip(
+                            f"in Lab4: {registered['subject_id']}, {lab4.text_of(registered['session_datetime'])}, {registered['device_name']}"
+                        )
             imgui.end_table()
         imgui.text_disabled("double-click to open a folder or dataset")
 
@@ -2055,8 +2882,12 @@ class Lab4App:
                 if imgui.small_button(f"{fa.ICON_FA_DATABASE}  Show in Lab4"):
                     self.show_in_lab4(path)
                 if imgui.is_item_hovered():
-                    idl.wrapped_tooltip("this file is a Lab4 recording's data; edit its details on Lab4 recordings")
-            elif is_recording_data(path) and not any(e.is_dir for e in self.entries if e.name == self.selected):
+                    idl.wrapped_tooltip(
+                        "this file is a Lab4 recording's data; edit its details on Lab4 recordings"
+                    )
+            elif is_recording_data(path) and not any(
+                e.is_dir for e in self.entries if e.name == self.selected
+            ):
                 blockers = self.register_problems(path)
                 imgui.same_line()
                 imgui.begin_disabled(bool(blockers))
@@ -2064,35 +2895,56 @@ class Lab4App:
                     self.register(path)
                 imgui.end_disabled()
                 if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
-                    idl.wrapped_tooltip("\n".join(blockers) if blockers else f"register {self.recording.label()} in Lab4 with this file")
+                    idl.wrapped_tooltip(
+                        "\n".join(blockers)
+                        if blockers
+                        else f"register {self.recording.label()} in Lab4 with this file"
+                    )
             if item.get("kind"):
                 tool, _, description = KINDS[item["kind"]]
                 imgui.same_line()
                 if imgui.small_button(f"{fa.ICON_FA_EYE}  Open in {tool}"):
-                    self.open_dataset(path=f"{self.path_browse.rstrip('/')}/{self.selected}", kind=item["kind"])
+                    self.open_dataset(
+                        path=f"{self.path_browse.rstrip('/')}/{self.selected}",
+                        kind=item["kind"],
+                    )
                 imgui.same_line()
                 imgui.text_disabled(description)
             if "sidecar" in self.futures:
                 imgui.text_disabled("reading metadata...")
             elif self.sidecar:
-                if imgui.small_button(f"{fa.ICON_FA_PEN_TO_SQUARE}  Load into the form"):
+                if imgui.small_button(
+                    f"{fa.ICON_FA_PEN_TO_SQUARE}  Load into the form"
+                ):
                     self.load_sidecar()
                 if imgui.is_item_hovered():
-                    idl.wrapped_tooltip("fill the metadata form below from this sidecar, e.g. to register the recording or attach it elsewhere")
+                    idl.wrapped_tooltip(
+                        "fill the metadata form below from this sidecar, e.g. to register the recording or attach it elsewhere"
+                    )
                 imgui.push_style_color(imgui.Col_.text, CODE)
-                imgui.input_text_multiline("##sidecar", self.sidecar, imgui.ImVec2(-1, 10 * em), imgui.InputTextFlags_.read_only)
+                imgui.input_text_multiline(
+                    "##sidecar",
+                    self.sidecar,
+                    imgui.ImVec2(-1, 10 * em),
+                    imgui.InputTextFlags_.read_only,
+                )
                 imgui.pop_style_color()
             else:
                 draw_wrapped("no sidecar yet", DIM)
         imgui.dummy(imgui.ImVec2(0, 0.4 * em))
-        if imgui.collapsing_header(f"{fa.ICON_FA_TAGS}  Metadata: {self.recording.label()}###browse_metadata"):
+        if imgui.collapsing_header(
+            f"{fa.ICON_FA_TAGS}  Metadata: {self.recording.label()}###browse_metadata"
+        ):
             self.draw_recording()
 
     def draw_lab4(self) -> None:
         """Refresh and filter, a row per Lab4 recording, then the picked one's details to edit."""
         em = imgui.get_font_size()
         if self.schema is None:
-            draw_wrapped("Offline: sign in to Lab4 to see its recordings and edit their details.", DIM)
+            draw_wrapped(
+                "Offline: sign in to Lab4 to see its recordings and edit their details.",
+                DIM,
+            )
             return
         loading = "lab4_rows" in self.futures
         imgui.begin_disabled(loading)
@@ -2103,22 +2955,59 @@ class Lab4App:
             idl.wrapped_tooltip("read Lab4 again; edits not saved yet are kept")
         imgui.same_line()
         imgui.set_next_item_width(-1)
-        _, self.filter_lab4 = imgui.input_text_with_hint("##filter_lab4", "filter by subject, session, device, label, group or data path", self.filter_lab4)
+        _, self.filter_lab4 = imgui.input_text_with_hint(
+            "##filter_lab4",
+            "filter by subject, session, device, label, group or data path",
+            self.filter_lab4,
+        )
 
         recordings = self.lab4.get("recording", [])
         needle = self.filter_lab4.strip().lower()
-        rows = [row for row in recordings if needle in " ".join(lab4.text_of(value) for value in row.values()).lower()]
-        picked = self.schema.key("recording", self.picked_lab4["recording"]) if self.picked_lab4 else None
-        flags = imgui.TableFlags_.row_bg | imgui.TableFlags_.borders_inner_h | imgui.TableFlags_.scroll_y | imgui.TableFlags_.resizable
+        rows = [
+            row
+            for row in recordings
+            if needle in " ".join(lab4.text_of(value) for value in row.values()).lower()
+        ]
+        picked = (
+            self.schema.key("recording", self.picked_lab4["recording"])
+            if self.picked_lab4
+            else None
+        )
+        flags = (
+            imgui.TableFlags_.row_bg
+            | imgui.TableFlags_.borders_inner_h
+            | imgui.TableFlags_.scroll_y
+            | imgui.TableFlags_.resizable
+        )
         # as tall as its rows, up to 40% of the page, so a short list leaves room for the picked recording
-        height = max(5 * em, min(0.4 * imgui.get_content_region_avail().y, (len(rows) + 1.5) * imgui.get_frame_height()))
+        height = max(
+            5 * em,
+            min(
+                0.4 * imgui.get_content_region_avail().y,
+                (len(rows) + 1.5) * imgui.get_frame_height(),
+            ),
+        )
         width_inner = 0.0 if imgui.get_content_region_avail().x >= 40 * em else 40 * em
-        if imgui.begin_table("##lab4", 5, flags | imgui.TableFlags_.scroll_x, imgui.ImVec2(0, height), width_inner):
+        if imgui.begin_table(
+            "##lab4",
+            5,
+            flags | imgui.TableFlags_.scroll_x,
+            imgui.ImVec2(0, height),
+            width_inner,
+        ):
             imgui.table_setup_scroll_freeze(0, 1)
-            imgui.table_setup_column("subject", imgui.TableColumnFlags_.width_fixed, 7 * em)
-            imgui.table_setup_column("session", imgui.TableColumnFlags_.width_fixed, 8 * em)
-            imgui.table_setup_column("device", imgui.TableColumnFlags_.width_fixed, 8 * em)
-            imgui.table_setup_column("label", imgui.TableColumnFlags_.width_stretch, 1.0)
+            imgui.table_setup_column(
+                "subject", imgui.TableColumnFlags_.width_fixed, 7 * em
+            )
+            imgui.table_setup_column(
+                "session", imgui.TableColumnFlags_.width_fixed, 8 * em
+            )
+            imgui.table_setup_column(
+                "device", imgui.TableColumnFlags_.width_fixed, 8 * em
+            )
+            imgui.table_setup_column(
+                "label", imgui.TableColumnFlags_.width_stretch, 1.0
+            )
             imgui.table_setup_column("data", imgui.TableColumnFlags_.width_stretch, 2.0)
             imgui.table_headers_row()
             clipper = imgui.ListClipper()
@@ -2128,14 +3017,25 @@ class Lab4App:
                     row = rows[i]
                     imgui.table_next_row()
                     imgui.table_next_column()
-                    flags_row = imgui.SelectableFlags_.span_all_columns | imgui.SelectableFlags_.allow_double_click
-                    clicked, _ = imgui.selectable(f"{row['subject_id']}##lab4_{i}", self.schema.key("recording", row) == picked, flags_row)
+                    flags_row = (
+                        imgui.SelectableFlags_.span_all_columns
+                        | imgui.SelectableFlags_.allow_double_click
+                    )
+                    clicked, _ = imgui.selectable(
+                        f"{row['subject_id']}##lab4_{i}",
+                        self.schema.key("recording", row) == picked,
+                        flags_row,
+                    )
                     if clicked:
                         self.pick_lab4(row)
-                    if clicked and imgui.is_mouse_double_clicked(imgui.MouseButton_.left):
+                    if clicked and imgui.is_mouse_double_clicked(
+                        imgui.MouseButton_.left
+                    ):
                         self.show_in_browse(row["data_path"])
                     if imgui.is_item_hovered():
-                        idl.wrapped_tooltip(f"{row['experimenter']} · {row['collection_name']}\ndouble-click to show its data in Browse storage")
+                        idl.wrapped_tooltip(
+                            f"{row['experimenter']} · {row['collection_name']}\ndouble-click to show its data in Browse storage"
+                        )
                     imgui.table_next_column()
                     imgui.text_disabled(lab4.text_of(row["session_datetime"]))
                     imgui.table_next_column()
@@ -2148,7 +3048,12 @@ class Lab4App:
         if recordings:
             draw_wrapped(f"{len(rows)} of {len(recordings)} recordings", DIM)
         else:
-            draw_wrapped("reading Lab4..." if loading else "no recordings in Lab4 yet; register one from Browse storage", DIM)
+            draw_wrapped(
+                "reading Lab4..."
+                if loading
+                else "no recordings in Lab4 yet; register one from Browse storage",
+                DIM,
+            )
         if self.picked_lab4 is not None:
             self.draw_lab4_recording()
 
@@ -2162,7 +3067,9 @@ class Lab4App:
         if imgui.small_button(f"{fa.ICON_FA_SITEMAP}  Show in Browse"):
             self.show_in_browse(row["data_path"])
         if imgui.is_item_hovered():
-            idl.wrapped_tooltip(f"list {posixpath.dirname(row['data_path'])} in Browse storage")
+            idl.wrapped_tooltip(
+                f"list {posixpath.dirname(row['data_path'])} in Browse storage"
+            )
         kind = classify_file(posixpath.basename(row["data_path"]))
         if kind is not None:
             imgui.same_line()
@@ -2173,12 +3080,22 @@ class Lab4App:
             self.recording = rec
             self.message, self.failed = f"the metadata form holds {rec.label()}", False
         if imgui.is_item_hovered():
-            idl.wrapped_tooltip("fill the metadata form on Transfer and Browse storage from this recording, e.g. to send or register more data of its session")
+            idl.wrapped_tooltip(
+                "fill the metadata form on Transfer and Browse storage from this recording, e.g. to send or register more data of its session"
+            )
         with imgui_ctx.begin_child("##lab4_recording"):
             sections = (
-                ("recording", "Recording", "this recording's columns; its key (experimenter, group, subject, session, device) cannot change here"),
+                (
+                    "recording",
+                    "Recording",
+                    "this recording's columns; its key (experimenter, group, subject, session, device) cannot change here",
+                ),
                 ("session", "Session", "shared by every recording of this session"),
-                ("subject", f"Subject {row['subject_id']}", "shared by every session of this subject"),
+                (
+                    "subject",
+                    f"Subject {row['subject_id']}",
+                    "shared by every session of this subject",
+                ),
             )
             for table, title, hint in sections:
                 if self.schema.details(table):
@@ -2198,43 +3115,83 @@ class Lab4App:
             changed = fields[name].strip() != lab4.text_of(row[name]).strip()
             self.row(name.replace("_", " ") + (" *" if changed else ""))
             if name.endswith("notes"):
-                _, fields[name] = imgui.input_text_multiline(f"##lab4_{table}_{name}", fields[name], imgui.ImVec2(-1, 3.5 * imgui.get_font_size()))
+                _, fields[name] = imgui.input_text_multiline(
+                    f"##lab4_{table}_{name}",
+                    fields[name],
+                    imgui.ImVec2(-1, 3.5 * imgui.get_font_size()),
+                )
             else:
-                fields[name] = self.pick(f"##lab4_{table}_{name}", fields[name], self.schema.choices.get(name, []), "YYYY-MM-DD" if column.type == "date" else "")
+                fields[name] = self.pick(
+                    f"##lab4_{table}_{name}",
+                    fields[name],
+                    self.schema.choices.get(name, []),
+                    "YYYY-MM-DD" if column.type == "date" else "",
+                )
         imgui.end_table()
 
     def draw_sidecar_lab4(self) -> None:
         """Whether the picked recording's data has a sidecar, and whether Save rewrites it."""
-        name = posixpath.basename(self.picked_lab4["recording"]["data_path"]) + SIDECAR_SUFFIX
+        name = (
+            posixpath.basename(self.picked_lab4["recording"]["data_path"])
+            + SIDECAR_SUFFIX
+        )
         imgui.dummy(imgui.ImVec2(0, 0.3 * imgui.get_font_size()))
         if "lab4_sidecar" in self.futures:
             imgui.text_disabled(f"looking for {name}...")
         elif self.error_sidecar_lab4:
             draw_wrapped(f"cannot read {name}: {self.error_sidecar_lab4}", WARN)
         elif self.sidecar_lab4 is None:
-            draw_wrapped(f"no {name} beside the data; Attach metadata in Browse storage writes one", DIM)
+            draw_wrapped(
+                f"no {name} beside the data; Attach metadata in Browse storage writes one",
+                DIM,
+            )
         elif self.moves_data():
             draw_wrapped(f"the data path changes, so {name} is left as it is", DIM)
         else:
-            _, self.rewrite_sidecar = imgui.checkbox(f"Save also rewrites {name}", self.rewrite_sidecar)
+            _, self.rewrite_sidecar = imgui.checkbox(
+                f"Save also rewrites {name}", self.rewrite_sidecar
+            )
             if imgui.is_item_hovered():
-                idl.wrapped_tooltip("the label, weight, notes and subject columns take the saved values; extra fields and the source stay")
+                idl.wrapped_tooltip(
+                    "the label, weight, notes and subject columns take the saved values; extra fields and the source stay"
+                )
 
     def draw_injections(self) -> None:
         """The subject's injections, and a form to add one."""
         subject = self.picked_lab4["subject"]["subject_id"]
-        self.subsection("Injections", f"the indicators injected into {subject}; adding one asks first")
+        self.subsection(
+            "Injections",
+            f"the indicators injected into {subject}; adding one asks first",
+        )
         columns = [c for c in self.schema.tables["injection"] if c.name != "subject_id"]
-        injections = [row for row in self.lab4.get("injection", []) if row["subject_id"] == subject]
+        injections = [
+            row
+            for row in self.lab4.get("injection", [])
+            if row["subject_id"] == subject
+        ]
         for row in injections:
-            imgui.text(" · ".join(text for text in (lab4.text_of(row[c.name]) for c in columns) if text))
+            imgui.text(
+                " · ".join(
+                    text
+                    for text in (lab4.text_of(row[c.name]) for c in columns)
+                    if text
+                )
+            )
         if not injections:
             imgui.text_disabled("none in Lab4")
         if self.begin_form("lab4_injection"):
             for column in columns:
-                self.row(column.name.replace("_", " ") + ("" if column.key or column.required else " (optional)"))
+                self.row(
+                    column.name.replace("_", " ")
+                    + ("" if column.key or column.required else " (optional)")
+                )
                 value = self.injection.get(column.name, "")
-                self.injection[column.name] = self.pick(f"##injection_{column.name}", value, self.schema.choices.get(column.name, []), "YYYY-MM-DD" if column.type == "date" else "")
+                self.injection[column.name] = self.pick(
+                    f"##injection_{column.name}",
+                    value,
+                    self.schema.choices.get(column.name, []),
+                    "YYYY-MM-DD" if column.type == "date" else "",
+                )
             imgui.end_table()
         blockers = self.injection_problems(subject)
         imgui.begin_disabled(bool(blockers))
@@ -2242,7 +3199,11 @@ class Lab4App:
             self.confirm_injection(subject)
         imgui.end_disabled()
         if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
-            idl.wrapped_tooltip("\n".join(blockers) if blockers else f"add this injection of {subject} to Lab4")
+            idl.wrapped_tooltip(
+                "\n".join(blockers)
+                if blockers
+                else f"add this injection of {subject} to Lab4"
+            )
 
     def draw_results(self) -> None:
         """Scan and filter, each machine's last scan, a row per recording and unit, then the picked row's details."""
@@ -2254,29 +3215,46 @@ class Lab4App:
             self.scan_machines()
         imgui.end_disabled()
         if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
-            idl.wrapped_tooltip("catalog the roots of every machine in Settings > Machines; lab4-scan does the same from a timer")
+            idl.wrapped_tooltip(
+                "catalog the roots of every machine in Settings > Machines; lab4-scan does the same from a timer"
+            )
         imgui.same_line()
         _, self.all_units = imgui.checkbox("all units", self.all_units)
         if imgui.is_item_hovered():
             idl.wrapped_tooltip("also list units no run or result uses yet")
         imgui.same_line()
         imgui.set_next_item_width(-1)
-        _, self.filter_results = imgui.input_text_with_hint("##filter_results", "filter by recording, unit, indicator or machine", self.filter_results)
+        _, self.filter_results = imgui.input_text_with_hint(
+            "##filter_results",
+            "filter by recording, unit, indicator or machine",
+            self.filter_results,
+        )
 
         last = {}
         for scan in self.overview["scans"]:
-            last[scan["storage"]] = max(last.get(scan["storage"], ""), scan["scanned_at"])
+            last[scan["storage"]] = max(
+                last.get(scan["storage"], ""), scan["scanned_at"]
+            )
         names = [m["name"] for m in self.settings.machines]
         for i, name in enumerate(names + sorted(set(last) - set(names))):
             if i:
                 imgui.same_line(0, 1.5 * em)
-            imgui.text_colored(OK if name in last else DIM, f"{fa.ICON_FA_LAPTOP}  {name}")
+            imgui.text_colored(
+                OK if name in last else DIM, f"{fa.ICON_FA_LAPTOP}  {name}"
+            )
             imgui.same_line()
-            imgui.text_disabled(f"scanned {last[name][5:16].replace('T', ' ')}" if name in last else "not scanned")
+            imgui.text_disabled(
+                f"scanned {last[name][5:16].replace('T', ' ')}"
+                if name in last
+                else "not scanned"
+            )
         if not names:
             draw_wrapped("Add the computers to catalog in Settings > Machines.", DIM)
         if scanning:
-            imgui.text_colored(ACCENT, f"scanning {self.scanning[0]}... {self.scanning[1]} items listed")
+            imgui.text_colored(
+                ACCENT,
+                f"scanning {self.scanning[0]}... {self.scanning[1]} items listed",
+            )
         for line in self.errors_scan:
             draw_wrapped(line, WARN)
 
@@ -2285,21 +3263,53 @@ class Lab4App:
             row
             for row in self.overview["rows"]
             if (self.all_units or row["runs"] or row["results"])
-            and needle in " ".join([row["recording"], row["unit"], row["indicator"], row["lab4"], *row["storages"]]).lower()
+            and needle
+            in " ".join(
+                [
+                    row["recording"],
+                    row["unit"],
+                    row["indicator"],
+                    row["lab4"],
+                    *row["storages"],
+                ]
+            ).lower()
         ]
-        flags = imgui.TableFlags_.row_bg | imgui.TableFlags_.borders_inner_h | imgui.TableFlags_.scroll_y | imgui.TableFlags_.resizable
+        flags = (
+            imgui.TableFlags_.row_bg
+            | imgui.TableFlags_.borders_inner_h
+            | imgui.TableFlags_.scroll_y
+            | imgui.TableFlags_.resizable
+        )
         height = max(8 * em, 0.45 * imgui.get_content_region_avail().y)
         # narrower than 40em, the table scrolls sideways rather than squeezing recording to nothing; 0 fits it to the view
         width_inner = 0.0 if imgui.get_content_region_avail().x >= 40 * em else 40 * em
-        if imgui.begin_table("##results", 8, flags | imgui.TableFlags_.scroll_x, imgui.ImVec2(0, height), width_inner):
+        if imgui.begin_table(
+            "##results",
+            8,
+            flags | imgui.TableFlags_.scroll_x,
+            imgui.ImVec2(0, height),
+            width_inner,
+        ):
             imgui.table_setup_scroll_freeze(0, 1)
-            imgui.table_setup_column("recording", imgui.TableColumnFlags_.width_stretch, 2.0)
-            imgui.table_setup_column("unit", imgui.TableColumnFlags_.width_fixed, 6 * em)
+            imgui.table_setup_column(
+                "recording", imgui.TableColumnFlags_.width_stretch, 2.0
+            )
+            imgui.table_setup_column(
+                "unit", imgui.TableColumnFlags_.width_fixed, 6 * em
+            )
             imgui.table_setup_column("Hz", imgui.TableColumnFlags_.width_fixed, 3 * em)
-            imgui.table_setup_column("frames", imgui.TableColumnFlags_.width_fixed, 3.5 * em)
-            imgui.table_setup_column("indicator", imgui.TableColumnFlags_.width_fixed, 5 * em)
-            imgui.table_setup_column("runs", imgui.TableColumnFlags_.width_fixed, 3.5 * em)
-            imgui.table_setup_column("results", imgui.TableColumnFlags_.width_fixed, 3.5 * em)
+            imgui.table_setup_column(
+                "frames", imgui.TableColumnFlags_.width_fixed, 3.5 * em
+            )
+            imgui.table_setup_column(
+                "indicator", imgui.TableColumnFlags_.width_fixed, 5 * em
+            )
+            imgui.table_setup_column(
+                "runs", imgui.TableColumnFlags_.width_fixed, 3.5 * em
+            )
+            imgui.table_setup_column(
+                "results", imgui.TableColumnFlags_.width_fixed, 3.5 * em
+            )
             imgui.table_setup_column("on", imgui.TableColumnFlags_.width_stretch, 1.0)
             imgui.table_headers_row()
             clipper = imgui.ListClipper()
@@ -2310,10 +3320,17 @@ class Lab4App:
                     key = (row["recording"], row["unit"])
                     imgui.table_next_row()
                     imgui.table_next_column()
-                    if imgui.selectable(f"{row['recording'] or '(unknown recording)'}##result_{i}", key == self.picked_result, imgui.SelectableFlags_.span_all_columns)[0]:
+                    if imgui.selectable(
+                        f"{row['recording'] or '(unknown recording)'}##result_{i}",
+                        key == self.picked_result,
+                        imgui.SelectableFlags_.span_all_columns,
+                    )[0]:
                         self.picked_result = key
                     if imgui.is_item_hovered():
-                        idl.wrapped_tooltip(f"{row['recording']} {row['unit']}" + (f"\nLab4 recording {row['lab4']}" if row["lab4"] else ""))
+                        idl.wrapped_tooltip(
+                            f"{row['recording']} {row['unit']}"
+                            + (f"\nLab4 recording {row['lab4']}" if row["lab4"] else "")
+                        )
                     imgui.table_next_column()
                     # most recordings have one session, so the table leaves MSession_0 out
                     imgui.text(row["unit"].removeprefix("MSession_0/") or "whole file")
@@ -2326,44 +3343,89 @@ class Lab4App:
                     imgui.table_next_column()
                     draw_run_counts(row["runs"])
                     imgui.table_next_column()
-                    imgui.text_disabled(str(len(row["results"])) if row["results"] else "")
+                    imgui.text_disabled(
+                        str(len(row["results"])) if row["results"] else ""
+                    )
                     imgui.table_next_column()
                     imgui.text_disabled(", ".join(row["storages"]))
             imgui.end_table()
         shown = f"{len(rows)} of {len(self.overview['rows'])} units"
-        draw_wrapped(shown if self.overview["rows"] else "nothing cataloged yet; Scan machines, or Scan a folder in Browse storage", DIM)
-        picked = next((row for row in self.overview["rows"] if (row["recording"], row["unit"]) == self.picked_result), None)
+        draw_wrapped(
+            shown
+            if self.overview["rows"]
+            else "nothing cataloged yet; Scan machines, or Scan a folder in Browse storage",
+            DIM,
+        )
+        picked = next(
+            (
+                row
+                for row in self.overview["rows"]
+                if (row["recording"], row["unit"]) == self.picked_result
+            ),
+            None,
+        )
         if picked is not None:
             self.draw_result(row=picked)
 
     def draw_result(self, row: dict) -> None:
         """The picked unit's data files, runs and result files, each opened in place on its machine."""
         em = imgui.get_font_size()
-        facts = [row["unit"] or "whole file", f"{format_rate(row['fs'])} Hz" if row["fs"] else "", f"{row['frames']} frames" if row["frames"] else "", row["indicator"]]
-        imgui.text_colored(ACCENT, f"{fa.ICON_FA_CHART_LINE}  {row['recording'] or '(unknown recording)'}")
+        facts = [
+            row["unit"] or "whole file",
+            f"{format_rate(row['fs'])} Hz" if row["fs"] else "",
+            f"{row['frames']} frames" if row["frames"] else "",
+            row["indicator"],
+        ]
+        imgui.text_colored(
+            ACCENT,
+            f"{fa.ICON_FA_CHART_LINE}  {row['recording'] or '(unknown recording)'}",
+        )
         imgui.same_line()
-        imgui.text_disabled(" · ".join(fact for fact in facts if fact) + (f" · Lab4 {row['lab4']}" if row["lab4"] else ""))
+        imgui.text_disabled(
+            " · ".join(fact for fact in facts if fact)
+            + (f" · Lab4 {row['lab4']}" if row["lab4"] else "")
+        )
         with imgui_ctx.begin_child("##result"):
             for i, data in enumerate(row["data"]):
                 kind = classify_file(posixpath.basename(data["path"]))
                 if imgui.small_button(f"{fa.ICON_FA_EYE}  Open##data_{i}"):
                     self.open_on(data["storage"], data["path"], kind)
                 if imgui.is_item_hovered():
-                    idl.wrapped_tooltip(f"open in {KINDS[kind][0] if kind else 'its default app'}")
+                    idl.wrapped_tooltip(
+                        f"open in {KINDS[kind][0] if kind else 'its default app'}"
+                    )
                 imgui.same_line()
                 imgui.text_disabled(data["storage"])
                 imgui.same_line()
                 imgui.text_colored(PATH, data["path"])
             if not row["data"]:
-                imgui.text_disabled("no data file found for this unit; runs name it in their input")
-            flags = imgui.TableFlags_.row_bg | imgui.TableFlags_.borders_inner_h | imgui.TableFlags_.sizing_stretch_prop
+                imgui.text_disabled(
+                    "no data file found for this unit; runs name it in their input"
+                )
+            flags = (
+                imgui.TableFlags_.row_bg
+                | imgui.TableFlags_.borders_inner_h
+                | imgui.TableFlags_.sizing_stretch_prop
+            )
             if row["runs"] and imgui.begin_table("##result_runs", 6, flags):
-                imgui.table_setup_column("##open", imgui.TableColumnFlags_.width_fixed, 5.5 * em)
-                imgui.table_setup_column("status", imgui.TableColumnFlags_.width_fixed, 4.5 * em)
-                imgui.table_setup_column("started", imgui.TableColumnFlags_.width_fixed, 7.5 * em)
-                imgui.table_setup_column("pipeline", imgui.TableColumnFlags_.width_stretch, 1.5)
-                imgui.table_setup_column("on", imgui.TableColumnFlags_.width_fixed, 5 * em)
-                imgui.table_setup_column("error", imgui.TableColumnFlags_.width_stretch, 1.5)
+                imgui.table_setup_column(
+                    "##open", imgui.TableColumnFlags_.width_fixed, 5.5 * em
+                )
+                imgui.table_setup_column(
+                    "status", imgui.TableColumnFlags_.width_fixed, 4.5 * em
+                )
+                imgui.table_setup_column(
+                    "started", imgui.TableColumnFlags_.width_fixed, 7.5 * em
+                )
+                imgui.table_setup_column(
+                    "pipeline", imgui.TableColumnFlags_.width_stretch, 1.5
+                )
+                imgui.table_setup_column(
+                    "on", imgui.TableColumnFlags_.width_fixed, 5 * em
+                )
+                imgui.table_setup_column(
+                    "error", imgui.TableColumnFlags_.width_stretch, 1.5
+                )
                 imgui.table_headers_row()
                 for i, run in enumerate(row["runs"]):
                     imgui.table_next_row()
@@ -2372,21 +3434,29 @@ class Lab4App:
                     if imgui.small_button(f"{fa.ICON_FA_EYE}##run_{i}"):
                         self.open_on(run["storage"], run["path"], viewer)
                     if imgui.is_item_hovered():
-                        idl.wrapped_tooltip("open in masknmf view" if viewer else "open the folder")
+                        idl.wrapped_tooltip(
+                            "open in masknmf view" if viewer else "open the folder"
+                        )
                     if run["log"]:
                         imgui.same_line()
                         if imgui.small_button(f"{fa.ICON_FA_FILE_LINES}##log_{i}"):
                             self.open_on(run["storage"], run["log"], None)
                         if imgui.is_item_hovered():
-                            idl.wrapped_tooltip(f"open {posixpath.basename(run['log'])}")
+                            idl.wrapped_tooltip(
+                                f"open {posixpath.basename(run['log'])}"
+                            )
                     imgui.table_next_column()
-                    imgui.text_colored(COLORS_RUN.get(run["status"], DIM), run["status"] or "-")
+                    imgui.text_colored(
+                        COLORS_RUN.get(run["status"], DIM), run["status"] or "-"
+                    )
                     imgui.table_next_column()
                     imgui.text_disabled(run["started"])
                     imgui.table_next_column()
                     imgui.text(run["pipeline"] or run["kind"])
                     if imgui.is_item_hovered():
-                        idl.wrapped_tooltip(f"{run['path']}\ninput: {run['input'] or 'not recorded'}")
+                        idl.wrapped_tooltip(
+                            f"{run['path']}\ninput: {run['input'] or 'not recorded'}"
+                        )
                     imgui.table_next_column()
                     imgui.text_disabled(run["storage"])
                     imgui.table_next_column()
@@ -2396,13 +3466,27 @@ class Lab4App:
                 imgui.end_table()
             if row["results"]:
                 imgui.dummy(imgui.ImVec2(0, 0.3 * em))
-                imgui.text_disabled(f"{len(row['results'])} result files · double-click to open")
+                imgui.text_disabled(
+                    f"{len(row['results'])} result files · double-click to open"
+                )
                 for i, result in enumerate(row["results"]):
-                    where = posixpath.basename(result["run"]) if result["run"] else posixpath.basename(posixpath.dirname(result["path"]))
+                    where = (
+                        posixpath.basename(result["run"])
+                        if result["run"]
+                        else posixpath.basename(posixpath.dirname(result["path"]))
+                    )
                     flags_row = imgui.SelectableFlags_.allow_double_click
-                    icon = ICONS_FILE.get(posixpath.splitext(result["path"])[1].lower(), fa.ICON_FA_FILE)
-                    clicked, _ = imgui.selectable(f"{icon}  {posixpath.basename(result['path'])}   {where} · {result['storage']}##res_file_{i}", False, flags_row)
-                    if clicked and imgui.is_mouse_double_clicked(imgui.MouseButton_.left):
+                    icon = ICONS_FILE.get(
+                        posixpath.splitext(result["path"])[1].lower(), fa.ICON_FA_FILE
+                    )
+                    clicked, _ = imgui.selectable(
+                        f"{icon}  {posixpath.basename(result['path'])}   {where} · {result['storage']}##res_file_{i}",
+                        False,
+                        flags_row,
+                    )
+                    if clicked and imgui.is_mouse_double_clicked(
+                        imgui.MouseButton_.left
+                    ):
                         self.open_on(result["storage"], result["path"], None)
                     if imgui.is_item_hovered():
                         idl.wrapped_tooltip(result["path"])
@@ -2431,8 +3515,14 @@ class Lab4App:
         em = imgui.get_font_size()
         if imgui.begin_tab_bar("##slice_tabs"):
             for table in COLUMNS:
-                flags = imgui.TabItemFlags_.set_selected if self.tab_request == table else 0
-                selected, _ = imgui.begin_tab_item(f"{table.capitalize()} ({len(self.rows_slices[table])})###tab_{table}", None, flags)
+                flags = (
+                    imgui.TabItemFlags_.set_selected if self.tab_request == table else 0
+                )
+                selected, _ = imgui.begin_tab_item(
+                    f"{table.capitalize()} ({len(self.rows_slices[table])})###tab_{table}",
+                    None,
+                    flags,
+                )
                 if selected:
                     if self.tab_slices != table:
                         self.editing = self.cell = None
@@ -2449,7 +3539,18 @@ class Lab4App:
             if table == "slices":
                 parent = rows_picked[0]["patient_id"] if rows_picked else ""
             elif table == "assays":
-                parent = rows_picked[0]["slice_id"] if rows_picked else next((r["slice_id"] for r in self.rows_slices["slices"] if r["id"] in self.picked["slices"]), "")
+                parent = (
+                    rows_picked[0]["slice_id"]
+                    if rows_picked
+                    else next(
+                        (
+                            r["slice_id"]
+                            for r in self.rows_slices["slices"]
+                            if r["id"] in self.picked["slices"]
+                        ),
+                        "",
+                    )
+                )
             else:
                 parent = ""
             try:
@@ -2464,8 +3565,19 @@ class Lab4App:
                 picked.add(id_)
                 self.scroll_slices = id_
                 # outline its first cell to fill, so typing starts there
-                self.cell = (table, id_, next(name for name, kind, _ in columns if kind not in ("joined", "owner")))
-                self.message, self.failed = f"added a row to {table}; type to fill the outlined cell, Tab for the next", False
+                self.cell = (
+                    table,
+                    id_,
+                    next(
+                        name
+                        for name, kind, _ in columns
+                        if kind not in ("joined", "owner")
+                    ),
+                )
+                self.message, self.failed = (
+                    f"added a row to {table}; type to fill the outlined cell, Tab for the next",
+                    False,
+                )
         if imgui.is_item_hovered():
             hints = {
                 "slices": "new slice for the picked slice's patient, or the newest patient",
@@ -2487,17 +3599,38 @@ class Lab4App:
         text_delete = f"{fa.ICON_FA_TRASH}  Delete"
         same_line_or_wrap(width_button(text_delete))
         # Delete alone empties a cell, as in Excel
-        pressed = imgui.get_io().key_ctrl and imgui.is_key_pressed(imgui.Key.delete) and not imgui.is_any_item_active() and not imgui.is_popup_open("", imgui.PopupFlags_.any_popup_id)
+        pressed = (
+            imgui.get_io().key_ctrl
+            and imgui.is_key_pressed(imgui.Key.delete)
+            and not imgui.is_any_item_active()
+            and not imgui.is_popup_open("", imgui.PopupFlags_.any_popup_id)
+        )
         if imgui.button(text_delete) or (picked and pressed):
             key = "patient_id" if table == "patients" else "slice_id"
             names = [str(r[key]) for r in rows_picked]
-            lines = [f"{len(names)} row(s) from {table}: {', '.join(names[:8])}{' ...' if len(names) > 8 else ''}", f"in {self.slices.path}", "Data files are not touched."]
-            self.confirm = {"title": "Delete rows?", "lines": lines, "button": "Delete", "run": self.delete_rows, "args": (table, sorted(picked))}
+            lines = [
+                f"{len(names)} row(s) from {table}: {', '.join(names[:8])}{' ...' if len(names) > 8 else ''}",
+                f"in {self.slices.path}",
+                "Data files are not touched.",
+            ]
+            self.confirm = {
+                "title": "Delete rows?",
+                "lines": lines,
+                "button": "Delete",
+                "run": self.delete_rows,
+                "args": (table, sorted(picked)),
+            }
         if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
-            idl.wrapped_tooltip("delete picked rows (Ctrl+Delete); for a failed slice, set its outcome instead")
+            idl.wrapped_tooltip(
+                "delete picked rows (Ctrl+Delete); for a failed slice, set its outcome instead"
+            )
         imgui.end_disabled()
         if table in ("patients", "slices"):
-            below, key = ("slices", "patient_id") if table == "patients" else ("assays", "slice_id")
+            below, key = (
+                ("slices", "patient_id")
+                if table == "patients"
+                else ("assays", "slice_id")
+            )
             text_below = f"{fa.ICON_FA_ARROW_RIGHT}  Show its {below}"
             same_line_or_wrap(width_button(text_below))
             imgui.begin_disabled(len(rows_picked) != 1)
@@ -2508,14 +3641,24 @@ class Lab4App:
             imgui.end_disabled()
         text_reset = f"{fa.ICON_FA_ARROWS_ROTATE}  Reset rows"
         width_user = 8 * em
-        width_right = imgui.calc_text_size("acting as").x + width_user + width_button(text_reset) + 2 * imgui.get_style().item_spacing.x
+        width_right = (
+            imgui.calc_text_size("acting as").x
+            + width_user
+            + width_button(text_reset)
+            + 2 * imgui.get_style().item_spacing.x
+        )
         same_line_or_wrap(width_right)
-        imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + max(0.0, imgui.get_content_region_avail().x - width_right))
+        imgui.set_cursor_pos_x(
+            imgui.get_cursor_pos_x()
+            + max(0.0, imgui.get_content_region_avail().x - width_right)
+        )
         imgui.align_text_to_frame_padding()
         imgui.text_disabled("acting as")
         imgui.same_line()
         imgui.set_next_item_width(width_user)
-        changed, index = imgui.combo("##user_slices", PEOPLE.index(self.user_slices), PEOPLE)
+        changed, index = imgui.combo(
+            "##user_slices", PEOPLE.index(self.user_slices), PEOPLE
+        )
         if changed:
             self.user_slices = PEOPLE[index]
             self.editing = None
@@ -2528,18 +3671,34 @@ class Lab4App:
                 "and reloads the rows from the file names. Edits are lost.",
                 "Data files are not touched.",
             ]
-            self.confirm = {"title": "Reset rows?", "lines": lines, "button": "Reset", "run": self.reset_slices, "args": ()}
+            self.confirm = {
+                "title": "Reset rows?",
+                "lines": lines,
+                "button": "Reset",
+                "run": self.reset_slices,
+                "args": (),
+            }
 
         imgui.set_next_item_width(-1)
-        hints = {"slices": "outcome:failed ephys:synaptic day:2", "patients": "diagnosis:epilepsy sex:f", "assays": "assay:live-dead owner:dana"}
-        changed, self.filter_slices[table] = imgui.input_text_with_hint("##filter", f"{fa.ICON_FA_FILTER}  filter, e.g. {hints[table]}", self.filter_slices[table])
+        hints = {
+            "slices": "outcome:failed ephys:synaptic day:2",
+            "patients": "diagnosis:epilepsy sex:f",
+            "assays": "assay:live-dead owner:dana",
+        }
+        changed, self.filter_slices[table] = imgui.input_text_with_hint(
+            "##filter",
+            f"{fa.ICON_FA_FILTER}  filter, e.g. {hints[table]}",
+            self.filter_slices[table],
+        )
         if changed:
             self.order_rows(table=table)
         order = self.order_slices[table]
         line = f"{len(order)} of {len(self.rows_slices[table])} {table}"
         line += f" · {len(picked)} picked" if picked else ""
         if table == "slices" and order:
-            line += f" · {summarize(Counter(r['outcome'] for r in order if r['outcome']))}"
+            line += (
+                f" · {summarize(Counter(r['outcome'] for r in order if r['outcome']))}"
+            )
         n_locked = sum(not can_edit(r["owner"], self.user_slices) for r in order)
         line += f" · {n_locked} locked" if n_locked else ""
         imgui.text_disabled(line)
@@ -2558,19 +3717,33 @@ class Lab4App:
             | imgui.TableFlags_.sizing_fixed_fit
         )
         height = max(8 * em, imgui.get_content_region_avail().y - 11 * em)
-        if imgui.begin_table(f"##db_{table}", len(columns), flags, imgui.ImVec2(0, height)):
+        if imgui.begin_table(
+            f"##db_{table}", len(columns), flags, imgui.ImVec2(0, height)
+        ):
             imgui.table_setup_scroll_freeze(1, 1)
             for i, (name, _, _) in enumerate(columns):
                 # default sort: collection date, region, patient, day
-                flags_column = imgui.TableColumnFlags_.default_sort if table == "slices" and i < 4 else 0
+                flags_column = (
+                    imgui.TableColumnFlags_.default_sort
+                    if table == "slices" and i < 4
+                    else 0
+                )
                 # the first column, where rows are picked, stays shown and first
-                flags_column |= imgui.TableColumnFlags_.no_hide | imgui.TableColumnFlags_.no_reorder if i == 0 else 0
+                flags_column |= (
+                    imgui.TableColumnFlags_.no_hide | imgui.TableColumnFlags_.no_reorder
+                    if i == 0
+                    else 0
+                )
                 imgui.table_setup_column(name, flags_column)
             imgui.table_headers_row()
             specs = imgui.table_get_sort_specs()
             if specs is not None and specs.specs_dirty:
                 self.sort_slices[table] = [
-                    (columns[specs.get_specs(n).column_index][0], specs.get_specs(n).sort_direction == imgui.SortDirection.ascending)
+                    (
+                        columns[specs.get_specs(n).column_index][0],
+                        specs.get_specs(n).sort_direction
+                        == imgui.SortDirection.ascending,
+                    )
                     for n in range(specs.specs_count)
                 ]
                 specs.specs_dirty = False
@@ -2579,14 +3752,23 @@ class Lab4App:
             names = [name for name, _, _ in columns]
             self.shown_slices = columns_shown(len(columns))
             self.keys_cell(table=table)
-            if self.cell is not None and (self.editing is not None or not imgui.is_any_item_active()):
+            if self.cell is not None and (
+                self.editing is not None or not imgui.is_any_item_active()
+            ):
                 # Tab moves the outlined cell, not imgui's focus
                 imgui.internal.set_key_owner(imgui.Key.tab, imgui.get_id("##cells"))
             hits = [i for i, row in enumerate(order) if row["id"] == self.scroll_slices]
             # the row and column the outlined cell moved to, drawn and scrolled to even when off screen
             moved = None
             if self.scroll_cell and self.cell is not None:
-                moved = next(((i, names.index(self.cell[2])) for i, row in enumerate(order) if row["id"] == self.cell[1]), None)
+                moved = next(
+                    (
+                        (i, names.index(self.cell[2]))
+                        for i, row in enumerate(order)
+                        if row["id"] == self.cell[1]
+                    ),
+                    None,
+                )
             self.scroll_cell = False
             self.rect_choice = None
             clipper = imgui.ListClipper()
@@ -2607,8 +3789,14 @@ class Lab4App:
                             if moved is not None and i == moved[0]:
                                 scroll_to_cell(moved[1])
                             x = imgui.get_cursor_pos_x()
-                            flags_row = imgui.SelectableFlags_.span_all_columns | imgui.SelectableFlags_.allow_overlap | imgui.SelectableFlags_.allow_double_click
-                            clicked, _ = imgui.selectable(f"##row_{row['id']}", row["id"] in picked, flags_row)
+                            flags_row = (
+                                imgui.SelectableFlags_.span_all_columns
+                                | imgui.SelectableFlags_.allow_overlap
+                                | imgui.SelectableFlags_.allow_double_click
+                            )
+                            clicked, _ = imgui.selectable(
+                                f"##row_{row['id']}", row["id"] in picked, flags_row
+                            )
                             if hits and i == hits[0]:
                                 imgui.set_scroll_here_y(0.5)
                                 self.scroll_slices = None
@@ -2628,8 +3816,15 @@ class Lab4App:
                                 column = imgui.table_get_hovered_column()
                                 if 0 <= column < len(columns):
                                     self.cell = (table, row["id"], names[column])
-                                    if imgui.is_mouse_double_clicked(imgui.MouseButton_.left):
-                                        self.start_edit(table, row, column, x_click=imgui.get_mouse_pos().x)
+                                    if imgui.is_mouse_double_clicked(
+                                        imgui.MouseButton_.left
+                                    ):
+                                        self.start_edit(
+                                            table,
+                                            row,
+                                            column,
+                                            x_click=imgui.get_mouse_pos().x,
+                                        )
                             imgui.same_line()
                             imgui.set_cursor_pos_x(x)
                             if not can_edit(row["owner"], self.user_slices):
@@ -2640,20 +3835,49 @@ class Lab4App:
                             if self.focus_edit:
                                 imgui.set_keyboard_focus_here()
                                 self.focus_edit = False
-                                self.caret_edit = None if self.x_click is None else caret_at(self.text_edit, self.x_click - imgui.get_cursor_screen_pos().x)
+                                self.caret_edit = (
+                                    None
+                                    if self.x_click is None
+                                    else caret_at(
+                                        self.text_edit,
+                                        self.x_click - imgui.get_cursor_screen_pos().x,
+                                    )
+                                )
                             self.hold_chars("##edit")
                             # no frame padding: the text stays where it was and the row keeps its height
-                            imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(0, 0))
-                            imgui.set_next_item_width(imgui.get_content_region_avail().x)
-                            flags_edit = imgui.InputTextFlags_.enter_returns_true | imgui.InputTextFlags_.callback_always
-                            entered, self.text_edit = imgui.input_text("##edit", self.text_edit, flags_edit, self.place_caret)
+                            imgui.push_style_var(
+                                imgui.StyleVar_.frame_padding, imgui.ImVec2(0, 0)
+                            )
+                            imgui.set_next_item_width(
+                                imgui.get_content_region_avail().x
+                            )
+                            flags_edit = (
+                                imgui.InputTextFlags_.enter_returns_true
+                                | imgui.InputTextFlags_.callback_always
+                            )
+                            entered, self.text_edit = imgui.input_text(
+                                "##edit", self.text_edit, flags_edit, self.place_caret
+                            )
                             imgui.pop_style_var()
                             back = -1 if imgui.get_io().key_shift else 1
                             step = (back, 0) if entered else None
                             if step is None and imgui.is_item_active():
-                                keys = {imgui.Key.tab: (0, back), imgui.Key.up_arrow: (-1, 0), imgui.Key.down_arrow: (1, 0)}
-                                step = next((s for key, s in keys.items() if imgui.is_key_pressed(key)), None)
-                            if imgui.is_item_deactivated() and imgui.is_key_pressed(imgui.Key.escape):
+                                keys = {
+                                    imgui.Key.tab: (0, back),
+                                    imgui.Key.up_arrow: (-1, 0),
+                                    imgui.Key.down_arrow: (1, 0),
+                                }
+                                step = next(
+                                    (
+                                        s
+                                        for key, s in keys.items()
+                                        if imgui.is_key_pressed(key)
+                                    ),
+                                    None,
+                                )
+                            if imgui.is_item_deactivated() and imgui.is_key_pressed(
+                                imgui.Key.escape
+                            ):
                                 # Escape keeps what was there
                                 self.editing = None
                             elif step is not None:
@@ -2682,14 +3906,24 @@ class Lab4App:
                             imgui.text_disabled(value)
                         else:
                             imgui.text(str(value))
-                        if kind == "text" and value and not editing and imgui.is_item_hovered():
+                        if (
+                            kind == "text"
+                            and value
+                            and not editing
+                            and imgui.is_item_hovered()
+                        ):
                             idl.wrapped_tooltip(value)
                         if editing and kind in ("choice", "ref"):
                             self.rect_choice = rect_cell(c)
                         if self.cell == (table, row["id"], name):
                             edge = rect_cell(c)
                             color = imgui.color_convert_float4_to_u32(ACCENT)
-                            imgui.get_window_draw_list().add_rect(imgui.ImVec2(edge.min.x + 1, edge.min.y + 1), imgui.ImVec2(edge.max.x - 1, edge.max.y - 1), color, thickness=2.0)
+                            imgui.get_window_draw_list().add_rect(
+                                imgui.ImVec2(edge.min.x + 1, edge.min.y + 1),
+                                imgui.ImVec2(edge.max.x - 1, edge.max.y - 1),
+                                color,
+                                thickness=2.0,
+                            )
             imgui.end_table()
 
         if self.open_choice:
@@ -2697,25 +3931,50 @@ class Lab4App:
             self.open_choice = False
         if self.rect_choice is not None:
             # the list drops from the cell, as Excel's does
-            imgui.set_next_window_pos(imgui.ImVec2(self.rect_choice.min.x, self.rect_choice.max.y), imgui.Cond_.appearing)
+            imgui.set_next_window_pos(
+                imgui.ImVec2(self.rect_choice.min.x, self.rect_choice.max.y),
+                imgui.Cond_.appearing,
+            )
         if imgui.begin_popup("##choice"):
             if self.editing is None:
                 imgui.close_current_popup()
             else:
                 self.draw_choices()
             imgui.end_popup()
-        elif self.editing is not None and next(column[1] for column in COLUMNS[self.editing[0]] if column[0] == self.editing[2]) in ("choice", "ref"):
+        elif self.editing is not None and next(
+            column[1]
+            for column in COLUMNS[self.editing[0]]
+            if column[0] == self.editing[2]
+        ) in ("choice", "ref"):
             self.editing = None
 
         row = rows_picked[0] if len(rows_picked) == 1 else None
         slice_ = None
         if row is not None and table != "patients":
-            slice_ = row if table == "slices" else next((s for s in self.rows_slices["slices"] if s["slice_id"] == row["slice_id"]), None)
+            slice_ = (
+                row
+                if table == "slices"
+                else next(
+                    (
+                        s
+                        for s in self.rows_slices["slices"]
+                        if s["slice_id"] == row["slice_id"]
+                    ),
+                    None,
+                )
+            )
         files, claimed, heading = self.files_of(table, row, slice_)
 
-        flags_detail = imgui.TableFlags_.sizing_stretch_same | imgui.TableFlags_.borders_inner_v
+        flags_detail = (
+            imgui.TableFlags_.sizing_stretch_same | imgui.TableFlags_.borders_inner_v
+        )
         # in a short window the table keeps its 8 lines and the page scrolls to these 3
-        if not imgui.begin_table("##slice_detail", 2, flags_detail, imgui.ImVec2(0, max(3 * em, imgui.get_content_region_avail().y))):
+        if not imgui.begin_table(
+            "##slice_detail",
+            2,
+            flags_detail,
+            imgui.ImVec2(0, max(3 * em, imgui.get_content_region_avail().y)),
+        ):
             return
         imgui.table_next_row()
         imgui.table_next_column()
@@ -2731,26 +3990,76 @@ class Lab4App:
                     DIM,
                 )
             elif table == "patients":
-                theirs = [s for s in self.rows_slices["slices"] if s["patient_id"] == row["patient_id"]]
-                draw_wrapped(f"{fa.ICON_FA_USER}  {row['patient_id']}: {row['age'] or '?'} y {row['sex'] or '?'}, {row['diagnosis'] or 'diagnosis not set'}, collected {row['collection_date']}")
-                outcomes = summarize(Counter(s["outcome"] for s in theirs if s["outcome"]))
-                days = summarize(Counter(f"on Day {s['day']}" for s in theirs if s["day"] is not None))
-                draw_wrapped(f"{len(theirs)} slices{': ' + outcomes if outcomes else ''}{'; ' + days if days else ''}", DIM)
+                theirs = [
+                    s
+                    for s in self.rows_slices["slices"]
+                    if s["patient_id"] == row["patient_id"]
+                ]
+                draw_wrapped(
+                    f"{fa.ICON_FA_USER}  {row['patient_id']}: {row['age'] or '?'} y {row['sex'] or '?'}, {row['diagnosis'] or 'diagnosis not set'}, collected {row['collection_date']}"
+                )
+                outcomes = summarize(
+                    Counter(s["outcome"] for s in theirs if s["outcome"])
+                )
+                days = summarize(
+                    Counter(
+                        f"on Day {s['day']}" for s in theirs if s["day"] is not None
+                    )
+                )
+                draw_wrapped(
+                    f"{len(theirs)} slices{': ' + outcomes if outcomes else ''}{'; ' + days if days else ''}",
+                    DIM,
+                )
                 if row["notes"]:
                     draw_wrapped(row["notes"], DIM)
             elif slice_ is not None:
-                failed = f" ({slice_['failure_reason']})" if slice_["failure_reason"] else ""
-                day = f"Day {slice_['day']}" if slice_["day"] is not None else "day not set"
-                draw_wrapped(f"{fa.ICON_FA_TABLE}  {slice_['slice_id']}: {day}, {slice_['region'] or 'region not set'}, {slice_['outcome']}{failed}", COLORS_SLICE.get(slice_["outcome"], TEXT))
-                patient = next((p for p in self.rows_slices["patients"] if p["patient_id"] == slice_["patient_id"]), None)
+                failed = (
+                    f" ({slice_['failure_reason']})" if slice_["failure_reason"] else ""
+                )
+                day = (
+                    f"Day {slice_['day']}"
+                    if slice_["day"] is not None
+                    else "day not set"
+                )
+                draw_wrapped(
+                    f"{fa.ICON_FA_TABLE}  {slice_['slice_id']}: {day}, {slice_['region'] or 'region not set'}, {slice_['outcome']}{failed}",
+                    COLORS_SLICE.get(slice_["outcome"], TEXT),
+                )
+                patient = next(
+                    (
+                        p
+                        for p in self.rows_slices["patients"]
+                        if p["patient_id"] == slice_["patient_id"]
+                    ),
+                    None,
+                )
                 if patient is not None:
-                    draw_wrapped(f"{fa.ICON_FA_USER}  {patient['patient_id']}, collected {patient['collection_date']}{', ' + patient['diagnosis'] if patient['diagnosis'] else ''}", DIM)
-                construct = f" {slice_['ep_construct']}" if slice_["ep_construct"] else ""
+                    draw_wrapped(
+                        f"{fa.ICON_FA_USER}  {patient['patient_id']}, collected {patient['collection_date']}{', ' + patient['diagnosis'] if patient['diagnosis'] else ''}",
+                        DIM,
+                    )
+                construct = (
+                    f" {slice_['ep_construct']}" if slice_["ep_construct"] else ""
+                )
                 notes = f" ({slice_['ephys_notes']})" if slice_["ephys_notes"] else ""
-                draw_wrapped(f"electroporated {slice_['ep_material'] or '?'}{construct}, dye {slice_['ep_dye'] or '?'} · ephys {slice_['ephys'] or '?'}{notes} · {slice_['incubator'] or 'incubator not set'}", DIM)
-                for assay in [a for a in self.rows_slices["assays"] if a["slice_id"] == slice_["slice_id"]]:
-                    live = f"{assay['percent_live']}% live, " if assay["percent_live"] is not None else ""
-                    draw_wrapped(f"{fa.ICON_FA_FLASK}  {assay['assay']} {assay['assay_date'] or ''} by {assay['owner']}: {live}{assay['result'] or ''}", CODE)
+                draw_wrapped(
+                    f"electroporated {slice_['ep_material'] or '?'}{construct}, dye {slice_['ep_dye'] or '?'} · ephys {slice_['ephys'] or '?'}{notes} · {slice_['incubator'] or 'incubator not set'}",
+                    DIM,
+                )
+                for assay in [
+                    a
+                    for a in self.rows_slices["assays"]
+                    if a["slice_id"] == slice_["slice_id"]
+                ]:
+                    live = (
+                        f"{assay['percent_live']}% live, "
+                        if assay["percent_live"] is not None
+                        else ""
+                    )
+                    draw_wrapped(
+                        f"{fa.ICON_FA_FLASK}  {assay['assay']} {assay['assay_date'] or ''} by {assay['owner']}: {live}{assay['result'] or ''}",
+                        CODE,
+                    )
                 if slice_["notes"]:
                     draw_wrapped(slice_["notes"], DIM)
                 if slice_["source"]:
@@ -2761,7 +4070,9 @@ class Lab4App:
             if self.indexed is None:
                 imgui.text_disabled("indexing..." if indexing else "not indexed yet")
             else:
-                imgui.text_disabled(f"{len(self.files_index)} files indexed {self.indexed['indexed_at'].replace('T', ' ')} ({self.indexed['storage']})")
+                imgui.text_disabled(
+                    f"{len(self.files_index)} files indexed {self.indexed['indexed_at'].replace('T', ' ')} ({self.indexed['storage']})"
+                )
             if imgui.is_item_hovered():
                 idl.wrapped_tooltip(f"all files under {ROOT}; read-only")
             imgui.same_line()
@@ -2770,10 +4081,16 @@ class Lab4App:
                 self.index_files()
             imgui.end_disabled()
             if self.error_index:
-                draw_wrapped(f"indexing failed on {self.storage.label}: {self.error_index}", WARN)
+                draw_wrapped(
+                    f"indexing failed on {self.storage.label}: {self.error_index}", WARN
+                )
             if self.fetch is not None:
                 total = max(self.fetch["total"], 1)
-                imgui.progress_bar(self.fetch["done"] / total, imgui.ImVec2(-6 * em, 0), f"copying {self.fetch['local'].name}")
+                imgui.progress_bar(
+                    self.fetch["done"] / total,
+                    imgui.ImVec2(-6 * em, 0),
+                    f"copying {self.fetch['local'].name}",
+                )
                 imgui.same_line()
                 if imgui.small_button("cancel##fetch"):
                     self.fetch["cancelled"] = True
@@ -2781,33 +4098,51 @@ class Lab4App:
                 imgui.text_colored(PATH, f"{fa.ICON_FA_FOLDER_OPEN}  {heading}")
             copies: dict[tuple[str, int], list[str]] = {}
             for f in files:
-                copies.setdefault((posixpath.basename(f["path"]), f["size"]), []).append(f["path"])
+                copies.setdefault(
+                    (posixpath.basename(f["path"]), f["size"]), []
+                ).append(f["path"])
             imgui.begin_disabled(self.fetch is not None)
             for (name, size), paths in copies.items():
                 kind = classify_file(name)
-                icon = ICONS_FILE.get(posixpath.splitext(name)[1].lower(), fa.ICON_FA_FILE)
+                icon = ICONS_FILE.get(
+                    posixpath.splitext(name)[1].lower(), fa.ICON_FA_FILE
+                )
                 stray = bool(claimed) and not any(path in claimed for path in paths)
                 color = WARN if stray else KEY if kind is not None else None
                 if color is not None:
                     imgui.push_style_color(imgui.Col_.text, color)
-                clicked, _ = imgui.selectable(f"{icon}  {name}##file_{paths[0]}", False, imgui.SelectableFlags_.allow_double_click)
+                clicked, _ = imgui.selectable(
+                    f"{icon}  {name}##file_{paths[0]}",
+                    False,
+                    imgui.SelectableFlags_.allow_double_click,
+                )
                 if color is not None:
                     imgui.pop_style_color()
                 if imgui.is_item_hovered():
-                    how = f"double-click to open in {KINDS[kind][0]}" if kind else "double-click to open in its default app"
+                    how = (
+                        f"double-click to open in {KINDS[kind][0]}"
+                        if kind
+                        else "double-click to open in its default app"
+                    )
                     where = "\n".join(paths)
-                    idl.wrapped_tooltip(f"{how}{'; matches no slice' if stray else ''}\n{where}")
+                    idl.wrapped_tooltip(
+                        f"{how}{'; matches no slice' if stray else ''}\n{where}"
+                    )
                 if clicked and imgui.is_mouse_double_clicked(imgui.MouseButton_.left):
                     self.open_file(path=paths[0], size=size)
                 imgui.same_line()
-                imgui.text_disabled(f"{human_bytes(size)}{f' · {len(paths)} copies' if len(paths) > 1 else ''}")
+                imgui.text_disabled(
+                    f"{human_bytes(size)}{f' · {len(paths)} copies' if len(paths) > 1 else ''}"
+                )
             imgui.end_disabled()
         imgui.end_table()
 
     def draw_connection(self) -> None:
         """Backend choice and its settings."""
         s = self.settings
-        draw_wrapped("No login here: a mounted share uses your mount, ssh uses your keys.", DIM)
+        draw_wrapped(
+            "No login here: a mounted share uses your mount, ssh uses your keys.", DIM
+        )
         for backend, label in zip(BACKENDS, ("Mounted share", "SSH")):
             if imgui.radio_button(label, s.backend == backend):
                 s.backend = backend
@@ -2816,12 +4151,22 @@ class Lab4App:
         if self.begin_form("connection"):
             if s.backend == "mounted":
                 self.row("mount root")
-                _, s.mount_root = imgui.input_text_with_hint("##root", r"e.g. X:\ or \\lamella.biohpc.swmed.edu\share", s.mount_root)
+                _, s.mount_root = imgui.input_text_with_hint(
+                    "##root",
+                    r"e.g. X:\ or \\lamella.biohpc.swmed.edu\share",
+                    s.mount_root,
+                )
                 self.row("shows")
-                _, s.mount_base = imgui.input_text_with_hint("##base", "BioHPC path of the mount root, e.g. /biohpc", s.mount_base)
+                _, s.mount_base = imgui.input_text_with_hint(
+                    "##base",
+                    "BioHPC path of the mount root, e.g. /biohpc",
+                    s.mount_base,
+                )
             else:
                 self.row("host")
-                _, s.ssh_host = imgui.input_text_with_hint("##host", "ssh alias or user@host, e.g. lab-research", s.ssh_host)
+                _, s.ssh_host = imgui.input_text_with_hint(
+                    "##host", "ssh alias or user@host, e.g. lab-research", s.ssh_host
+                )
             imgui.end_table()
         if s.backend == "mounted":
             if imgui.small_button(f"{fa.ICON_FA_MAGNIFYING_GLASS}  Detect"):
@@ -2830,14 +4175,19 @@ class Lab4App:
             if self.mounts is None:
                 imgui.text_disabled(f"looking for {s.mount_base} mounts...")
             elif not self.mounts:
-                draw_wrapped(f"no {s.mount_base} mount found; map the share first (e.g. SSHFS-Win)", DIM)
+                draw_wrapped(
+                    f"no {s.mount_base} mount found; map the share first (e.g. SSHFS-Win)",
+                    DIM,
+                )
             else:
                 imgui.text_disabled(f"{s.mount_base} mounts found:")
                 for i, mount in enumerate(self.mounts):
                     if imgui.small_button(f"use##mount_{i}"):
                         self.use_mount(mount)
                     imgui.same_line()
-                    imgui.text_colored(OK if mount.root == s.mount_root else TEXT, mount.root)
+                    imgui.text_colored(
+                        OK if mount.root == s.mount_root else TEXT, mount.root
+                    )
                     imgui.same_line()
                     imgui.text_disabled(mount.remote)
         hint = (
@@ -2858,10 +4208,14 @@ class Lab4App:
                 remove = i
             imgui.same_line()
             imgui.set_next_item_width(15 * em)
-            _, pair[0] = imgui.input_text_with_hint(f"##dpath_{i}", "/path/on/biohpc", pair[0])
+            _, pair[0] = imgui.input_text_with_hint(
+                f"##dpath_{i}", "/path/on/biohpc", pair[0]
+            )
             imgui.same_line()
             imgui.set_next_item_width(-1)
-            _, pair[1] = imgui.input_text_with_hint(f"##ddesc_{i}", "what goes here", pair[1])
+            _, pair[1] = imgui.input_text_with_hint(
+                f"##ddesc_{i}", "what goes here", pair[1]
+            )
         if remove is not None:
             s.destinations.pop(remove)
         if imgui.button(f"{fa.ICON_FA_PLUS}  Add destination"):
@@ -2882,26 +4236,44 @@ class Lab4App:
             if imgui.small_button(fa.ICON_FA_XMARK):
                 remove = i
             imgui.same_line()
-            imgui.text_colored(ACCENT, f"{fa.ICON_FA_LAPTOP}  {machine['name'] or 'new machine'}")
+            imgui.text_colored(
+                ACCENT, f"{fa.ICON_FA_LAPTOP}  {machine['name'] or 'new machine'}"
+            )
             if self.begin_form(f"machine_{i}"):
                 self.row("name")
-                _, machine["name"] = imgui.input_text_with_hint("##name", "unique, e.g. pml-w1", machine["name"])
+                _, machine["name"] = imgui.input_text_with_hint(
+                    "##name", "unique, e.g. pml-w1", machine["name"]
+                )
                 self.row("reached")
                 for reach in REACHES:
-                    if imgui.radio_button(NAMES_REACH[reach], machine["reach"] == reach):
+                    if imgui.radio_button(
+                        NAMES_REACH[reach], machine["reach"] == reach
+                    ):
                         machine["reach"] = reach
                     imgui.same_line()
                 imgui.new_line()
                 if machine["reach"] == "ssh":
                     self.row("host")
-                    _, machine["host"] = imgui.input_text_with_hint("##host", "ssh alias or user@host, keys set up", machine["host"])
+                    _, machine["host"] = imgui.input_text_with_hint(
+                        "##host", "ssh alias or user@host, keys set up", machine["host"]
+                    )
                 elif machine["reach"] == "mounted":
                     self.row("mounted at")
-                    _, machine["mount_root"] = imgui.input_text_with_hint("##mount_root", r"local folder, e.g. ~/pml-w1, or Z:\ on Windows", machine["mount_root"])
+                    _, machine["mount_root"] = imgui.input_text_with_hint(
+                        "##mount_root",
+                        r"local folder, e.g. ~/pml-w1, or Z:\ on Windows",
+                        machine["mount_root"],
+                    )
                     self.row("shows")
-                    _, machine["mount_base"] = imgui.input_text_with_hint("##mount_base", "the machine's path there, e.g. /home/fo", machine["mount_base"])
+                    _, machine["mount_base"] = imgui.input_text_with_hint(
+                        "##mount_base",
+                        "the machine's path there, e.g. /home/fo",
+                        machine["mount_base"],
+                    )
                 self.row("roots")
-                changed, text = imgui.input_text_multiline("##roots", "\n".join(machine["roots"]), imgui.ImVec2(-1, 3.2 * em))
+                changed, text = imgui.input_text_multiline(
+                    "##roots", "\n".join(machine["roots"]), imgui.ImVec2(-1, 3.2 * em)
+                )
                 if changed:
                     machine["roots"] = text.split("\n")
                 imgui.end_table()
@@ -2913,7 +4285,10 @@ class Lab4App:
             s.machines.append({**this_computer(), "name": "", "reach": "mounted"})
         names = [m["name"] for m in s.machines]
         if len(set(names)) < len(names) or "" in names:
-            draw_wrapped("Each machine needs its own name: the catalog keys its rows by it.", WARN)
+            draw_wrapped(
+                "Each machine needs its own name: the catalog keys its rows by it.",
+                WARN,
+            )
 
     def draw_viewers(self) -> None:
         """Viewer commands."""
@@ -2923,7 +4298,9 @@ class Lab4App:
             self.row("mbo")
             _, s.command_mbo = imgui.input_text_with_hint("##mbo", "mbo", s.command_mbo)
             self.row("masknmf")
-            _, s.command_masknmf = imgui.input_text_with_hint("##masknmf", "masknmf", s.command_masknmf)
+            _, s.command_masknmf = imgui.input_text_with_hint(
+                "##masknmf", "masknmf", s.command_masknmf
+            )
             imgui.end_table()
         for name, command in (("mbo", s.command_mbo), ("masknmf", s.command_masknmf)):
             found = shutil.which(command)
@@ -2932,20 +4309,35 @@ class Lab4App:
     def draw_processing_settings(self) -> None:
         """SLURM job settings."""
         s = self.settings
-        draw_wrapped("Jobs are submitted over ssh with your keys. To set up BioHPC, see hpc/asap7/README.md in pml_utilities.", DIM)
+        draw_wrapped(
+            "Jobs are submitted over ssh with your keys. To set up BioHPC, see hpc/asap7/README.md in pml_utilities.",
+            DIM,
+        )
         if self.begin_form("processing"):
             self.row("ssh host")
-            _, s.processing_host = imgui.input_text_with_hint("##phost", "ssh alias or user@host of a BioHPC login node", s.processing_host)
+            _, s.processing_host = imgui.input_text_with_hint(
+                "##phost",
+                "ssh alias or user@host of a BioHPC login node",
+                s.processing_host,
+            )
             self.row("partition")
-            _, s.partition = imgui.input_text_with_hint("##partition", "a SLURM partition with GPUs", s.partition)
+            _, s.partition = imgui.input_text_with_hint(
+                "##partition", "a SLURM partition with GPUs", s.partition
+            )
             self.row("GPUs")
             _, s.gres = imgui.input_text_with_hint("##gres", "gpu:1", s.gres)
             self.row("email")
-            _, s.email = imgui.input_text_with_hint("##email", "emailed when a job ends; empty for none", s.email)
+            _, s.email = imgui.input_text_with_hint(
+                "##email", "emailed when a job ends; empty for none", s.email
+            )
             self.row("pipeline folder")
-            _, s.dir_asap7 = imgui.input_text_with_hint("##dir_asap7", "~/repos/pml_utilities/hpc/asap7", s.dir_asap7)
+            _, s.dir_asap7 = imgui.input_text_with_hint(
+                "##dir_asap7", "~/repos/pml_utilities/hpc/asap7", s.dir_asap7
+            )
             self.row(f"{s.mount_base} is")
-            _, s.cluster_root = imgui.input_text_with_hint("##cluster_root", "the share's path on BioHPC nodes", s.cluster_root)
+            _, s.cluster_root = imgui.input_text_with_hint(
+                "##cluster_root", "the share's path on BioHPC nodes", s.cluster_root
+            )
             imgui.end_table()
         draw_wrapped(
             f"~/ is your BioHPC home. Jobs see {s.mount_base}/data2 as "
@@ -2963,12 +4355,20 @@ class Lab4App:
         spacing = imgui.get_style().item_spacing.x
         padding = 2 * imgui.get_style().frame_padding.x + 1.5 * em
         text_out = f"{fa.ICON_FA_POWER_OFF}  Sign out"
-        widths = [imgui.calc_text_size(t).x + padding for t in [text_out if self.user else None, "Quit", label] if t]
+        widths = [
+            imgui.calc_text_size(t).x + padding
+            for t in [text_out if self.user else None, "Quit", label]
+            if t
+        ]
         height = 1.7 * em
         if not imgui.begin_table("##footer", 2, imgui.TableFlags_.sizing_stretch_prop):
             return
         imgui.table_setup_column("##status", imgui.TableColumnFlags_.width_stretch)
-        imgui.table_setup_column("##buttons", imgui.TableColumnFlags_.width_fixed, sum(widths) + spacing * (len(widths) - 1))
+        imgui.table_setup_column(
+            "##buttons",
+            imgui.TableColumnFlags_.width_fixed,
+            sum(widths) + spacing * (len(widths) - 1),
+        )
         imgui.table_next_row()
         imgui.table_next_column()
         if not self.user:
@@ -2977,11 +4377,16 @@ class Lab4App:
             for problem in problems[:3]:
                 idl.text_wrapped_colored(WARN, f"{fa.ICON_FA_CIRCLE_INFO}  {problem}")
         elif self.message and self.failed:
-            idl.text_wrapped_colored(ERROR, f"{fa.ICON_FA_CIRCLE_EXCLAMATION}  {self.message}")
+            idl.text_wrapped_colored(
+                ERROR, f"{fa.ICON_FA_CIRCLE_EXCLAMATION}  {self.message}"
+            )
         elif self.message:
             idl.text_wrapped_colored(OK, f"{fa.ICON_FA_CIRCLE_CHECK}  {self.message}")
         elif self.page == "transfer":
-            idl.text_wrapped_colored(DIM, f"{fa.ICON_FA_CLOUD_ARROW_UP}  sends to {self.destination() or '...'} over {self.settings.backend}")
+            idl.text_wrapped_colored(
+                DIM,
+                f"{fa.ICON_FA_CLOUD_ARROW_UP}  sends to {self.destination() or '...'} over {self.settings.backend}",
+            )
         imgui.table_next_column()
         idl.push_button_style(dialog.theme, primary=False)
         if self.user:
@@ -3011,7 +4416,9 @@ def run() -> None:
     params = hello_imgui.RunnerParams()
     params.app_window_params.window_title = TITLE_WINDOW
     params.app_window_params.window_geometry.size = SIZE_WINDOW
-    params.imgui_window_params.tweaked_theme.theme = hello_imgui.ImGuiTheme_.darcula_darker
+    params.imgui_window_params.tweaked_theme.theme = (
+        hello_imgui.ImGuiTheme_.darcula_darker
+    )
     params.ini_folder_type = hello_imgui.IniFolderType.absolute_path
     params.ini_filename = str(data_dir() / "window.ini")
     app.dialog.apply_host_theme(params)

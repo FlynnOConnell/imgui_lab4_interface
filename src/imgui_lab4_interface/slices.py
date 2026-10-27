@@ -27,13 +27,41 @@ ROOT = "/biohpc/data4/Shobhana"
 
 SEXES = ["F", "M", "U"]
 HEMISPHERES = ["left", "right"]
-REGIONS = ["hippocampus", "middle temporal gyrus", "superior temporal gyrus", "frontal cortex", "parietal cortex"]
-DIAGNOSES = ["temporal lobe epilepsy", "mesial temporal sclerosis", "focal cortical dysplasia", "glioma, access tissue", "metastasis, access tissue"]
+REGIONS = [
+    "hippocampus",
+    "middle temporal gyrus",
+    "superior temporal gyrus",
+    "frontal cortex",
+    "parietal cortex",
+]
+DIAGNOSES = [
+    "temporal lobe epilepsy",
+    "mesial temporal sclerosis",
+    "focal cortical dysplasia",
+    "glioma, access tissue",
+    "metastasis, access tissue",
+]
 SITES = ["site A", "site B", "site C"]
 MATERIALS = ["none", "mRNA", "plasmid", "RNP", "dye only"]
-DYES = ["none", "Alexa 488", "Alexa 594", "Lucifer yellow", "biocytin", "OGB-1", "dextran-TMR"]
+DYES = [
+    "none",
+    "Alexa 488",
+    "Alexa 594",
+    "Lucifer yellow",
+    "biocytin",
+    "OGB-1",
+    "dextran-TMR",
+]
 EPHYS = ["none", "intrinsic", "synaptic", "intrinsic + synaptic"]
-INCUBATOR = ["storage solution", "chamber, bubbling", "culture", "out, recorded", "out, imaged", "out, fixed", "n/a"]
+INCUBATOR = [
+    "storage solution",
+    "chamber, bubbling",
+    "culture",
+    "out, recorded",
+    "out, imaged",
+    "out, fixed",
+    "n/a",
+]
 OUTCOMES = ["ok", "failed"]
 ASSAYS = ["live-dead", "2P imaging", "histology", "IHC"]
 
@@ -118,31 +146,187 @@ SEED_PATIENTS = [
 ]
 # slice id, patient, day, region, electroporated, construct, dye, incubator, file match, notes
 SEED_SLICES = [
-    ("HS260727.A", "HS260727", 1, None, None, "", "Alexa 488", None, "2026-07-27 -_b_ -_c_ -_d_ -24hrs -cell -260727c2", "unlettered files of the day"),
+    (
+        "HS260727.A",
+        "HS260727",
+        1,
+        None,
+        None,
+        "",
+        "Alexa 488",
+        None,
+        "2026-07-27 -_b_ -_c_ -_d_ -24hrs -cell -260727c2",
+        "unlettered files of the day",
+    ),
     ("HS260727.B", "HS260727", 1, None, None, "", None, None, "2026-07-27 _b_", ""),
     ("HS260727.C", "HS260727", 1, None, None, "", None, None, "2026-07-27 _c_", ""),
-    ("HS260727.D", "HS260727", 1, None, None, "", "Alexa 488", None, "2026-07-27 _d_", "mean image and movie of D"),
-    ("HS260727.cells", "HS260727", 1, None, "dye only", "", "Alexa 488", None, "2026-07-27 cell", "cells 2 to 7 filled with Alexa 488"),
-    ("HS260727.24h", "HS260727", 2, None, None, "", None, "chamber, bubbling", "2026-07-27 24hrs", "24 hrs in the chamber, bubbling"),
-    ("HS260727.48h", "HS260727", 3, None, None, "", None, "chamber, bubbling", "2026-07-29 48hrs", "48 hrs in the chamber, bubbling"),
-    ("HS260831.A", "HS260831", 1, None, None, "", None, None, "2026-08-31 -day9 -egfp", "ephys in SS_Ephys_HSlice_8-31-2026.pxp"),
-    ("HS260831.egfp", "HS260831", None, None, "mRNA", "EGFP mRNA", None, None, "2026-08-31 egfp", ""),
-    ("HS260831.d9-bp", "HS260831", 9, None, None, "", None, "culture", "2026-08-31 day9_bpmedium", "day 9 in BP medium"),
-    ("HS260831.d9-dana", "HS260831", 9, None, None, "", None, "culture", "2026-08-31 day9_danamedium", "day 9 in Dana's medium"),
+    (
+        "HS260727.D",
+        "HS260727",
+        1,
+        None,
+        None,
+        "",
+        "Alexa 488",
+        None,
+        "2026-07-27 _d_",
+        "mean image and movie of D",
+    ),
+    (
+        "HS260727.cells",
+        "HS260727",
+        1,
+        None,
+        "dye only",
+        "",
+        "Alexa 488",
+        None,
+        "2026-07-27 cell",
+        "cells 2 to 7 filled with Alexa 488",
+    ),
+    (
+        "HS260727.24h",
+        "HS260727",
+        2,
+        None,
+        None,
+        "",
+        None,
+        "chamber, bubbling",
+        "2026-07-27 24hrs",
+        "24 hrs in the chamber, bubbling",
+    ),
+    (
+        "HS260727.48h",
+        "HS260727",
+        3,
+        None,
+        None,
+        "",
+        None,
+        "chamber, bubbling",
+        "2026-07-29 48hrs",
+        "48 hrs in the chamber, bubbling",
+    ),
+    (
+        "HS260831.A",
+        "HS260831",
+        1,
+        None,
+        None,
+        "",
+        None,
+        None,
+        "2026-08-31 -day9 -egfp",
+        "ephys in SS_Ephys_HSlice_8-31-2026.pxp",
+    ),
+    (
+        "HS260831.egfp",
+        "HS260831",
+        None,
+        None,
+        "mRNA",
+        "EGFP mRNA",
+        None,
+        None,
+        "2026-08-31 egfp",
+        "",
+    ),
+    (
+        "HS260831.d9-bp",
+        "HS260831",
+        9,
+        None,
+        None,
+        "",
+        None,
+        "culture",
+        "2026-08-31 day9_bpmedium",
+        "day 9 in BP medium",
+    ),
+    (
+        "HS260831.d9-dana",
+        "HS260831",
+        9,
+        None,
+        None,
+        "",
+        None,
+        "culture",
+        "2026-08-31 day9_danamedium",
+        "day 9 in Dana's medium",
+    ),
     ("HS260914.d1", "HS260914", 1, None, None, "", None, None, "2026-09-14 day1", ""),
-    ("HS260914.d2", "HS260914", 2, None, "mRNA", "EGFP mRNA", None, "storage solution", "2026-09-14 day2", ""),
-    ("HS260914.d3", "HS260914", 3, None, None, "", None, "culture", "2026-09-14 day3", "culture in OSCM / BPNM"),
-    ("HS260918.d1", "HS260918", 1, "hippocampus", None, "", None, "storage solution", "2026-09-18 hippocampus", ""),
+    (
+        "HS260914.d2",
+        "HS260914",
+        2,
+        None,
+        "mRNA",
+        "EGFP mRNA",
+        None,
+        "storage solution",
+        "2026-09-14 day2",
+        "",
+    ),
+    (
+        "HS260914.d3",
+        "HS260914",
+        3,
+        None,
+        None,
+        "",
+        None,
+        "culture",
+        "2026-09-14 day3",
+        "culture in OSCM / BPNM",
+    ),
+    (
+        "HS260918.d1",
+        "HS260918",
+        1,
+        "hippocampus",
+        None,
+        "",
+        None,
+        "storage solution",
+        "2026-09-18 hippocampus",
+        "",
+    ),
 ]
 
-MONTHS = {m: i for i, m in enumerate(("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"), 1)}
+MONTHS = {
+    m: i
+    for i, m in enumerate(
+        (
+            "jan",
+            "feb",
+            "mar",
+            "apr",
+            "may",
+            "jun",
+            "jul",
+            "aug",
+            "sep",
+            "oct",
+            "nov",
+            "dec",
+        ),
+        1,
+    )
+}
 # the date spellings in the file names: 2026-05-22, 7-27-2026 or 8-31-26, 20260812, 260727, May21st_2026
 PATTERNS_DATE = (
     (re.compile(r"(?<!\d)(20\d\d)-(\d\d)-(\d\d)(?!\d)"), "ymd"),
     (re.compile(r"(?<!\d)(\d{1,2})-(\d{1,2})-(\d{4}|\d{2})(?!\d)"), "mdy"),
     (re.compile(r"(?<!\d)(20\d\d)(\d\d)(\d\d)(?!\d)"), "ymd"),
     (re.compile(r"(?<!\d)(2\d)(\d\d)(\d\d)(?!\d)"), "ymd"),
-    (re.compile(r"(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[ _-]*(\d{1,2})(?:st|nd|rd|th)?[ _-]*(20\d\d)"), "name"),
+    (
+        re.compile(
+            r"(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[ _-]*(\d{1,2})(?:st|nd|rd|th)?[ _-]*(20\d\d)"
+        ),
+        "name",
+    ),
 )
 ISO = re.compile(r"\d{4}-\d\d-\d\d")
 
@@ -154,7 +338,11 @@ def can_edit(owner: str, user: str) -> bool:
 
 def locked(owner: str) -> str:
     """Who can edit a row owner added."""
-    return f"only {ADMIN} can edit it" if owner == ADMIN else f"only {owner} or {ADMIN} can edit it"
+    return (
+        f"only {ADMIN} can edit it"
+        if owner == ADMIN
+        else f"only {owner} or {ADMIN} can edit it"
+    )
 
 
 def file_dates(path: str) -> set[str]:
@@ -163,7 +351,13 @@ def file_dates(path: str) -> set[str]:
     for pattern, order in PATTERNS_DATE:
         for m in pattern.finditer(path.lower()):
             a, b, c = m.groups()
-            year, month, day = (a, b, c) if order == "ymd" else (c, a, b) if order == "mdy" else (c, MONTHS[a], b)
+            year, month, day = (
+                (a, b, c)
+                if order == "ymd"
+                else (c, a, b)
+                if order == "mdy"
+                else (c, MONTHS[a], b)
+            )
             year = int(year) + 2000 if int(year) < 100 else int(year)
             try:
                 found.add(date(year, int(month), int(day)).isoformat())
@@ -204,12 +398,16 @@ class SliceDatabase:
         if self.path.exists():
             with closing(sqlite3.connect(self.path)) as db:
                 version = db.execute("PRAGMA user_version").fetchone()[0]
-                n_tables = db.execute("SELECT count(*) FROM sqlite_master WHERE type = 'table'").fetchone()[0]
+                n_tables = db.execute(
+                    "SELECT count(*) FROM sqlite_master WHERE type = 'table'"
+                ).fetchone()[0]
             if version != VERSION_SCHEMA and n_tables:
                 aside = self.path.with_name(f"{self.path.stem}.v{version}.sqlite")
                 n = 1
                 while aside.exists():
-                    aside = self.path.with_name(f"{self.path.stem}.v{version}.{n}.sqlite")
+                    aside = self.path.with_name(
+                        f"{self.path.stem}.v{version}.{n}.sqlite"
+                    )
                     n += 1
                 self.path.rename(aside)
                 self.moved_aside = aside
@@ -232,11 +430,37 @@ class SliceDatabase:
                 "INSERT INTO patients (patient_id, collection_date, owner, notes) VALUES (?, ?, ?, ?)",
                 (patient, collected, ADMIN, NOTE_PATIENT),
             )
-        for slice_id, patient, day, region, material, construct, dye, incubator, match, notes in SEED_SLICES:
+        for (
+            slice_id,
+            patient,
+            day,
+            region,
+            material,
+            construct,
+            dye,
+            incubator,
+            match,
+            notes,
+        ) in SEED_SLICES:
             db.execute(
                 "INSERT INTO slices (slice_id, patient_id, day, region, ep_material, ep_construct, ep_dye, incubator, outcome, "
                 "experimenter, file_match, source, owner, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (slice_id, patient, day, region, material, construct, dye, incubator, "ok", ADMIN, match, SOURCE, ADMIN, notes),
+                (
+                    slice_id,
+                    patient,
+                    day,
+                    region,
+                    material,
+                    construct,
+                    dye,
+                    incubator,
+                    "ok",
+                    ADMIN,
+                    match,
+                    SOURCE,
+                    ADMIN,
+                    notes,
+                ),
             )
 
     def reset(self) -> None:
@@ -257,8 +481,12 @@ class SliceDatabase:
     def files(self) -> tuple[list[dict], Optional[dict]]:
         """The saved file index under ROOT, and when it was taken."""
         with closing(self.connect()) as db:
-            files = [dict(row) for row in db.execute("SELECT * FROM files ORDER BY path")]
-            indexed = db.execute("SELECT * FROM indexed WHERE root = ?", (ROOT,)).fetchone()
+            files = [
+                dict(row) for row in db.execute("SELECT * FROM files ORDER BY path")
+            ]
+            indexed = db.execute(
+                "SELECT * FROM indexed WHERE root = ?", (ROOT,)
+            ).fetchone()
         return files, None if indexed is None else dict(indexed)
 
     def index_files(self, storage: Storage) -> tuple[list[dict], Optional[dict]]:
@@ -271,7 +499,10 @@ class SliceDatabase:
         with closing(self.connect()) as db, db:
             db.execute("DELETE FROM files")
             db.executemany("INSERT INTO files VALUES (:path, :size, :mtime)", files)
-            db.execute("INSERT OR REPLACE INTO indexed VALUES (?, ?, ?)", (ROOT, datetime.now().isoformat(timespec="seconds"), storage.label))
+            db.execute(
+                "INSERT OR REPLACE INTO indexed VALUES (?, ?, ?)",
+                (ROOT, datetime.now().isoformat(timespec="seconds"), storage.label),
+            )
         return self.files()
 
     def next_id(self, db: sqlite3.Connection, table: str, patient_id: str) -> str:
@@ -284,14 +515,23 @@ class SliceDatabase:
             return f"H{date.today():%y}.{n:03d}"
         # slice ids are unique across patients, since a slice can move to another patient
         taken = {row[0] for row in db.execute("SELECT slice_id FROM slices")}
-        n = db.execute("SELECT count(*) FROM slices WHERE patient_id = ?", (patient_id,)).fetchone()[0] + 1
+        n = (
+            db.execute(
+                "SELECT count(*) FROM slices WHERE patient_id = ?", (patient_id,)
+            ).fetchone()[0]
+            + 1
+        )
         while f"{patient_id}.S{n:02d}" in taken:
             n += 1
         return f"{patient_id}.S{n:02d}"
 
-    def check_owner(self, db: sqlite3.Connection, table: str, ids: list[int], user: str) -> None:
+    def check_owner(
+        self, db: sqlite3.Connection, table: str, ids: list[int], user: str
+    ) -> None:
         """Raise ValueError naming the first row user may not change."""
-        for row in db.execute(f"SELECT * FROM {table} WHERE id IN ({', '.join('?' * len(ids))})", ids):
+        for row in db.execute(
+            f"SELECT * FROM {table} WHERE id IN ({', '.join('?' * len(ids))})", ids
+        ):
             if not can_edit(row["owner"], user):
                 name = row["patient_id" if table == "patients" else "slice_id"]
                 raise ValueError(f"{name} is {row['owner']}'s; {locked(row['owner'])}")
@@ -303,39 +543,72 @@ class SliceDatabase:
         """
         with closing(self.connect()) as db, db:
             if table == "patients":
-                values = {"patient_id": self.next_id(db, table, ""), "collection_date": date.today().isoformat(), "sex": "U"}
+                values = {
+                    "patient_id": self.next_id(db, table, ""),
+                    "collection_date": date.today().isoformat(),
+                    "sex": "U",
+                }
             elif table == "slices":
-                found = db.execute("SELECT patient_id, collection_date FROM patients WHERE patient_id = ? OR ? = '' ORDER BY id DESC LIMIT 1", (parent, parent)).fetchone()
+                found = db.execute(
+                    "SELECT patient_id, collection_date FROM patients WHERE patient_id = ? OR ? = '' ORDER BY id DESC LIMIT 1",
+                    (parent, parent),
+                ).fetchone()
                 if found is None:
                     raise ValueError("add a patient first")
                 values = {
-                    "slice_id": self.next_id(db, table, found["patient_id"]), "patient_id": found["patient_id"], "day": 1,
-                    "ep_material": "none", "ep_dye": "none", "ephys": "none", "incubator": "storage solution", "outcome": "ok",
-                    "experimenter": user, "file_match": found["collection_date"] or "",
+                    "slice_id": self.next_id(db, table, found["patient_id"]),
+                    "patient_id": found["patient_id"],
+                    "day": 1,
+                    "ep_material": "none",
+                    "ep_dye": "none",
+                    "ephys": "none",
+                    "incubator": "storage solution",
+                    "outcome": "ok",
+                    "experimenter": user,
+                    "file_match": found["collection_date"] or "",
                 }
             else:
-                found = db.execute("SELECT slice_id FROM slices WHERE slice_id = ? OR ? = '' ORDER BY id DESC LIMIT 1", (parent, parent)).fetchone()
+                found = db.execute(
+                    "SELECT slice_id FROM slices WHERE slice_id = ? OR ? = '' ORDER BY id DESC LIMIT 1",
+                    (parent, parent),
+                ).fetchone()
                 if found is None:
                     raise ValueError("add a slice first")
-                values = {"slice_id": found["slice_id"], "assay": "live-dead", "assay_date": date.today().isoformat()}
+                values = {
+                    "slice_id": found["slice_id"],
+                    "assay": "live-dead",
+                    "assay_date": date.today().isoformat(),
+                }
             values["owner"] = user
             names = ", ".join(values)
-            return db.execute(f"INSERT INTO {table} ({names}) VALUES ({', '.join('?' * len(values))})", tuple(values.values())).lastrowid
+            return db.execute(
+                f"INSERT INTO {table} ({names}) VALUES ({', '.join('?' * len(values))})",
+                tuple(values.values()),
+            ).lastrowid
 
     def duplicate(self, table: str, ids: list[int], user: str) -> list[int]:
         """Copy rows as user's, with new ids; returns them."""
         made = []
         with closing(self.connect()) as db, db:
             for id_ in ids:
-                row = db.execute(f"SELECT * FROM {table} WHERE id = ?", (id_,)).fetchone()
+                row = db.execute(
+                    f"SELECT * FROM {table} WHERE id = ?", (id_,)
+                ).fetchone()
                 if row is None:
                     continue
                 values = {k: row[k] for k in row.keys() if k != "id"}
                 if table != "assays":
-                    values["patient_id" if table == "patients" else "slice_id"] = self.next_id(db, table, values.get("patient_id", ""))
+                    values["patient_id" if table == "patients" else "slice_id"] = (
+                        self.next_id(db, table, values.get("patient_id", ""))
+                    )
                 values["owner"] = user
                 names = ", ".join(values)
-                made.append(db.execute(f"INSERT INTO {table} ({names}) VALUES ({', '.join('?' * len(values))})", tuple(values.values())).lastrowid)
+                made.append(
+                    db.execute(
+                        f"INSERT INTO {table} ({names}) VALUES ({', '.join('?' * len(values))})",
+                        tuple(values.values()),
+                    ).lastrowid
+                )
         return made
 
     def delete(self, table: str, ids: list[int], user: str) -> None:
@@ -346,7 +619,9 @@ class SliceDatabase:
                 db.executemany(f"DELETE FROM {table} WHERE id = ?", [(i,) for i in ids])
         except sqlite3.IntegrityError:
             below = "slices" if table == "patients" else "assays"
-            raise ValueError(f"these still have {below}; delete or move them first") from None
+            raise ValueError(
+                f"these still have {below}; delete or move them first"
+            ) from None
 
     def update(self, table: str, id_: int, column: str, text: str, user: str) -> None:
         """Set one cell from typed text, as user; raises ValueError when the text or the edit is not allowed."""
@@ -364,7 +639,9 @@ class SliceDatabase:
             try:
                 value = int(number) if number else None
             except ValueError:
-                raise ValueError(f"{column} must be a whole number{' or Day N' if kind == 'day' else ''}, not {text!r}") from None
+                raise ValueError(
+                    f"{column} must be a whole number{' or Day N' if kind == 'day' else ''}, not {text!r}"
+                ) from None
         elif kind == "date" and text:
             try:
                 date.fromisoformat(text)
@@ -377,9 +654,15 @@ class SliceDatabase:
         try:
             with closing(self.connect()) as db, db:
                 self.check_owner(db, table, [id_], user)
-                db.execute(f"UPDATE {table} SET {column} = ? WHERE id = ?", (value, id_))
+                db.execute(
+                    f"UPDATE {table} SET {column} = ? WHERE id = ?", (value, id_)
+                )
         except sqlite3.IntegrityError:
-            raise ValueError(f"no {choices[:-1]} {text}" if kind == "ref" else f"{column} {text} is already taken") from None
+            raise ValueError(
+                f"no {choices[:-1]} {text}"
+                if kind == "ref"
+                else f"{column} {text} is already taken"
+            ) from None
 
     def export(self, table: str, path: Path) -> None:
         """Write the table to csv, without the id column."""

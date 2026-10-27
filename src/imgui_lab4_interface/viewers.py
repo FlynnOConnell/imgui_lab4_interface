@@ -9,7 +9,11 @@ from pathlib import Path
 from imgui_lab4_interface.catalog import KINDS
 from imgui_lab4_interface.config import Settings, data_dir
 
-FLAGS_DETACHED = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+FLAGS_DETACHED = (
+    subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+    if sys.platform == "win32"
+    else 0
+)
 
 
 def command(settings: Settings, kind: str, local: Path) -> list[str]:
@@ -23,7 +27,9 @@ def launch(argv: list[str]) -> Path:
     """Start argv detached; returns its log file."""
     executable = shutil.which(argv[0])
     if executable is None:
-        raise FileNotFoundError(f"{argv[0]} not found; set its path in Settings > Viewers")
+        raise FileNotFoundError(
+            f"{argv[0]} not found; set its path in Settings > Viewers"
+        )
     logs = data_dir() / "logs"
     logs.mkdir(exist_ok=True)
     log = logs / f"{datetime.now():%Y%m%dT%H%M%S}_{Path(argv[0]).stem}.log"

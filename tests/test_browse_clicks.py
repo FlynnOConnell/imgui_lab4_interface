@@ -61,7 +61,11 @@ def run_window(app, draw: str, steps, size: tuple[int, int] = (1040, 720)) -> di
     params.ini_folder_type = hello_imgui.IniFolderType.temp_folder
     params.ini_filename = "imgui_lab4_interface_clicks.ini"
     params.use_imgui_test_engine = True
-    params.callbacks.post_init = lambda: setattr(imgui.get_io(), "backend_flags", imgui.get_io().backend_flags | imgui.BackendFlags_.renderer_has_textures)
+    params.callbacks.post_init = lambda: setattr(
+        imgui.get_io(),
+        "backend_flags",
+        imgui.get_io().backend_flags | imgui.BackendFlags_.renderer_has_textures,
+    )
     params.callbacks.register_tests = register_tests
     params.callbacks.show_gui = gui
     try:
@@ -85,7 +89,13 @@ def browse_clicks(tmp: Path) -> dict:
     (mount / "flynn" / "M231").mkdir(parents=True)
     (mount / "flynn" / "rec.h5").write_bytes(b"\x89HDF\r\n\x1a\n")
     idl.ensure_assets()
-    app = app_module.Lab4App(Settings(mount_root=str(mount), mount_base="/biohpc", destinations=[["/biohpc", "root"]]))
+    app = app_module.Lab4App(
+        Settings(
+            mount_root=str(mount),
+            mount_base="/biohpc",
+            destinations=[["/biohpc", "root"]],
+        )
+    )
     app.work_offline()
     app.page = "browse"
 
@@ -113,7 +123,9 @@ def slice_clicks(tmp: Path) -> dict:
 
     app_module.find_mounts = lambda base: []
     idl.ensure_assets()
-    app = app_module.Lab4App(Settings(mount_root=str(tmp / "mount"), mount_base="/biohpc"))
+    app = app_module.Lab4App(
+        Settings(mount_root=str(tmp / "mount"), mount_base="/biohpc")
+    )
     app.work_offline()
     app.page = "slices"
     row = next(r for r in app.rows_slices["slices"] if r["slice_id"] == "HS260727.B")
@@ -147,7 +159,9 @@ def slice_cells(tmp: Path) -> dict:
 
     app_module.find_mounts = lambda base: []
     idl.ensure_assets()
-    app = app_module.Lab4App(Settings(mount_root=str(tmp / "mount"), mount_base="/biohpc"))
+    app = app_module.Lab4App(
+        Settings(mount_root=str(tmp / "mount"), mount_base="/biohpc")
+    )
     app.work_offline()
     app.page = "slices"
     row = next(r for r in app.rows_slices["slices"] if r["slice_id"] == "HS260727.B")
@@ -167,7 +181,9 @@ def slice_cells(tmp: Path) -> dict:
         return next(r for r in app.slices.rows("slices") if r["id"] == row["id"])[name]
 
     def steps(ctx, seen):
-        ctx.mouse_move(f"**/##row_{row['id']}", imgui.test_engine.TestOpFlags_.move_to_edge_l)
+        ctx.mouse_move(
+            f"**/##row_{row['id']}", imgui.test_engine.TestOpFlags_.move_to_edge_l
+        )
         ctx.mouse_click(0)
         seen["click outlines"] = app.cell[2]
         ctx.key_press(imgui.Key.right_arrow, names.index("ephys_notes"))
@@ -183,7 +199,10 @@ def slice_cells(tmp: Path) -> dict:
         ctx.yield_(2)
         ctx.key_chars("er")
         ctx.key_press(imgui.Key.enter)
-        seen["f2 appends, enter moves down"] = [value("ephys_notes"), app.cell[1] != row["id"]]
+        seen["f2 appends, enter moves down"] = [
+            value("ephys_notes"),
+            app.cell[1] != row["id"],
+        ]
         ctx.key_press(imgui.Key.up_arrow)
         ctx.key_chars("zzz")
         ctx.yield_(2)
@@ -227,7 +246,9 @@ def slice_toolbar(tmp: Path, width: int) -> dict:
 
     app_module.find_mounts = lambda base: []
     idl.ensure_assets()
-    app = app_module.Lab4App(Settings(mount_root=str(tmp / "mount"), mount_base="/biohpc"))
+    app = app_module.Lab4App(
+        Settings(mount_root=str(tmp / "mount"), mount_base="/biohpc")
+    )
     app.work_offline()
     app.page = "slices"
 
@@ -243,26 +264,44 @@ def slice_toolbar(tmp: Path, width: int) -> dict:
 
 
 def clicks_in_subprocess(tmp_path: Path, page: str) -> dict:
-    result = subprocess.run([sys.executable, __file__, str(tmp_path), page], capture_output=True, text=True, timeout=120)
+    result = subprocess.run(
+        [sys.executable, __file__, str(tmp_path), page],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
     lines = [line for line in result.stdout.splitlines() if line.startswith("{")]
     if not lines:
-        pytest.skip(f"the test engine did not report (exit {result.returncode}): {result.stderr[-500:]}")
+        pytest.skip(
+            f"the test engine did not report (exit {result.returncode}): {result.stderr[-500:]}"
+        )
     seen = json.loads(lines[-1])
     if "error" in seen:
         pytest.skip(f"null backend unavailable: {seen['error']}")
     return seen
 
 
-def test_double_click_enters_folders_and_register_shows_only_for_h5(tmp_path, monkeypatch):
+def test_double_click_enters_folders_and_register_shows_only_for_h5(
+    tmp_path, monkeypatch
+):
     monkeypatch.setenv("IMGUI_LAB4_HOME", str(tmp_path / "home"))
     seen = clicks_in_subprocess(tmp_path, "browse")
-    assert seen == {"register on folder": False, "after double-click": "/biohpc/flynn", "register on h5": True, "finished": True}
+    assert seen == {
+        "register on folder": False,
+        "after double-click": "/biohpc/flynn",
+        "register on h5": True,
+        "finished": True,
+    }
 
 
 def test_double_click_opens_slice_files_and_cells(tmp_path, monkeypatch):
     monkeypatch.setenv("IMGUI_LAB4_HOME", str(tmp_path / "home"))
     seen = clicks_in_subprocess(tmp_path, "slices")
-    assert seen == {"opened": ["HSLice_B_7-27-2026.mesc"], "cell": "collection_date comes from the patient; edit it on Patients", "finished": True}
+    assert seen == {
+        "opened": ["HSLice_B_7-27-2026.mesc"],
+        "cell": "collection_date comes from the patient; edit it on Patients",
+        "finished": True,
+    }
 
 
 def test_slice_cells_edit_as_in_excel(tmp_path, monkeypatch):
@@ -287,11 +326,20 @@ def test_slice_cells_edit_as_in_excel(tmp_path, monkeypatch):
 def test_slice_toolbar_fits_the_window(tmp_path, monkeypatch, width):
     monkeypatch.setenv("IMGUI_LAB4_HOME", str(tmp_path / "home"))
     seen = clicks_in_subprocess(tmp_path, f"toolbar{width}")
-    assert seen == {"reset inside": True, "picker inside": True, "no sideways scroll": True, "finished": True}
+    assert seen == {
+        "reset inside": True,
+        "picker inside": True,
+        "no sideways scroll": True,
+        "finished": True,
+    }
 
 
 if __name__ == "__main__":
     pages = {"browse": browse_clicks, "slices": slice_clicks, "cells": slice_cells}
     tmp, page = Path(sys.argv[1]), sys.argv[2]
-    seen = slice_toolbar(tmp, width=int(page.removeprefix("toolbar"))) if page.startswith("toolbar") else pages[page](tmp)
+    seen = (
+        slice_toolbar(tmp, width=int(page.removeprefix("toolbar")))
+        if page.startswith("toolbar")
+        else pages[page](tmp)
+    )
     print(json.dumps(seen), flush=True)

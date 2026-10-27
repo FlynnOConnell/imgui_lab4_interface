@@ -1,5 +1,4 @@
 import json
-import os
 import shutil
 import sys
 import time
@@ -9,8 +8,22 @@ from pathlib import Path
 
 import pytest
 
-from imgui_lab4_interface import SIDECAR_SUFFIX, MountedStorage, Recording, Settings, Transfer, open_storage, SshStorage
-from imgui_lab4_interface.storage import SshReader, destination_state, download, options_shared, shows
+from imgui_lab4_interface import (
+    SIDECAR_SUFFIX,
+    MountedStorage,
+    Recording,
+    Settings,
+    Transfer,
+    open_storage,
+    SshStorage,
+)
+from imgui_lab4_interface.storage import (
+    SshReader,
+    destination_state,
+    download,
+    options_shared,
+    shows,
+)
 
 
 def test_transfer_copies_files_and_folders_with_sidecars(tmp_path):
@@ -22,7 +35,13 @@ def test_transfer_copies_files_and_folders_with_sidecars(tmp_path):
     storage = MountedStorage(str(tmp_path / "mount"))
     metadata = Recording(subject_id="M231").sidecar(user="loson")
 
-    transfer = Transfer(storage, [local / "session", local / "movie.tif"], "/archive/pml/raw/", metadata, overwrite=False)
+    transfer = Transfer(
+        storage,
+        [local / "session", local / "movie.tif"],
+        "/archive/pml/raw/",
+        metadata,
+        overwrite=False,
+    )
     transfer.run()
 
     dest = tmp_path / "mount" / "archive" / "pml" / "raw"
@@ -53,7 +72,13 @@ def test_cancel_stops_mid_transfer(tmp_path):
     source = tmp_path / "big.bin"
     source.write_bytes(b"x" * 10)
     (tmp_path / "mount").mkdir()
-    transfer = Transfer(MountedStorage(str(tmp_path / "mount")), [source], "/dest", None, overwrite=False)
+    transfer = Transfer(
+        MountedStorage(str(tmp_path / "mount")),
+        [source],
+        "/dest",
+        None,
+        overwrite=False,
+    )
     transfer.cancelled = True
     with pytest.raises(InterruptedError):
         transfer.run()
@@ -65,7 +90,10 @@ def test_mounted_listdir_and_check(tmp_path):
     (root / "work" / "b.txt").write_text("hi")
     storage = MountedStorage(str(root))
     storage.check()
-    assert [(e.name, e.is_dir, e.size) for e in storage.listdir("/work")] == [("sub", True, 0), ("b.txt", False, 2)]
+    assert [(e.name, e.is_dir, e.size) for e in storage.listdir("/work")] == [
+        ("sub", True, 0),
+        ("b.txt", False, 2),
+    ]
     with pytest.raises(OSError):
         MountedStorage("").check()
     with pytest.raises(OSError):
@@ -73,8 +101,14 @@ def test_mounted_listdir_and_check(tmp_path):
 
 
 def test_open_storage_follows_settings(tmp_path):
-    assert isinstance(open_storage(Settings(backend="mounted", mount_root=str(tmp_path))), MountedStorage)
-    assert open_storage(Settings(backend="ssh", ssh_host="biohpc")).label == SshStorage("biohpc").label
+    assert isinstance(
+        open_storage(Settings(backend="mounted", mount_root=str(tmp_path))),
+        MountedStorage,
+    )
+    assert (
+        open_storage(Settings(backend="ssh", ssh_host="biohpc")).label
+        == SshStorage("biohpc").label
+    )
 
 
 def test_settings_round_trip_ignores_unknown(tmp_path):
@@ -133,13 +167,29 @@ def test_a_sidecar_and_a_lab4_row_load_back_into_the_form():
         notes="first session",
         extra=[["rig", "B"]],
     )
-    assert Recording.from_sidecar(json.loads(json.dumps(rec.sidecar(user="loson")))) == rec
+    assert (
+        Recording.from_sidecar(json.loads(json.dumps(rec.sidecar(user="loson")))) == rec
+    )
     # an older sidecar without the newer fields still loads
-    assert Recording.from_sidecar({"key": {"subject_id": "M231", "session_datetime": "2026-08-21 14:30:05"}}).session_datetime == "2026-08-21 14:30:05"
+    assert (
+        Recording.from_sidecar(
+            {"key": {"subject_id": "M231", "session_datetime": "2026-08-21 14:30:05"}}
+        ).session_datetime
+        == "2026-08-21 14:30:05"
+    )
 
-    row = {**rec.key(), "data_path": "/biohpc/data2/rec.h5", "ui_label": None, "weight_g": Decimal("24.50")}
+    row = {
+        **rec.key(),
+        "data_path": "/biohpc/data2/rec.h5",
+        "ui_label": None,
+        "weight_g": Decimal("24.50"),
+    }
     loaded = Recording.from_lab4(row, "first session", {"genotype": "WT"})
-    assert (loaded.session_datetime, loaded.ui_label, loaded.weight_g) == ("2026-08-21 14:30", "", "24.50")
+    assert (loaded.session_datetime, loaded.ui_label, loaded.weight_g) == (
+        "2026-08-21 14:30",
+        "",
+        "24.50",
+    )
     assert loaded.key() == rec.key()
 
 
@@ -162,7 +212,9 @@ def test_transfer_makes_one_new_folder_but_not_its_parents(tmp_path):
     Transfer(storage, [source], "/biohpc/data2/M231", None, overwrite=True).run()
 
     with pytest.raises(FileNotFoundError):
-        Transfer(storage, [source], "/biohpc/data2/M232/raw", None, overwrite=False).run()
+        Transfer(
+            storage, [source], "/biohpc/data2/M232/raw", None, overwrite=False
+        ).run()
     assert not (tmp_path / "mount" / "data2" / "M232").exists()
 
 
@@ -170,8 +222,14 @@ def test_destination_state(tmp_path):
     (tmp_path / "data2" / "M231").mkdir(parents=True)
     (tmp_path / "data2" / "notes.txt").write_text("x")
     storage = MountedStorage(str(tmp_path), "/biohpc")
-    assert destination_state(storage, "/biohpc/data2/M231/") == ("/biohpc/data2/M231/", "exists")
-    assert destination_state(storage, "/biohpc/data2/M232") == ("/biohpc/data2/M232", "new")
+    assert destination_state(storage, "/biohpc/data2/M231/") == (
+        "/biohpc/data2/M231/",
+        "exists",
+    )
+    assert destination_state(storage, "/biohpc/data2/M232") == (
+        "/biohpc/data2/M232",
+        "new",
+    )
     with pytest.raises(OSError, match="at most one new folder"):
         destination_state(storage, "/biohpc/data2/M232/raw")
     with pytest.raises(OSError, match="is a file"):
@@ -190,7 +248,12 @@ def test_a_cancelled_download_leaves_nothing(tmp_path):
     (tmp_path / "mount" / "big.mesc").write_bytes(b"x" * 10)
     local = tmp_path / "cache" / "big.mesc"
     with pytest.raises(InterruptedError, match="cancelled"):
-        download(MountedStorage(str(tmp_path / "mount")), "/big.mesc", local, {"done": 0, "cancelled": True})
+        download(
+            MountedStorage(str(tmp_path / "mount")),
+            "/big.mesc",
+            local,
+            {"done": 0, "cancelled": True},
+        )
     assert not local.exists() and not local.with_name("big.mesc.part").exists()
 
 
@@ -205,7 +268,11 @@ def test_an_error_while_reading_over_ssh_is_not_replaced(tmp_path):
 
 def test_an_unset_mount_root_reaches_nothing():
     storage = MountedStorage("", "/biohpc")
-    for call in (storage.check, lambda: storage.listdir("/biohpc"), lambda: destination_state(storage, "/biohpc/data2")):
+    for call in (
+        storage.check,
+        lambda: storage.listdir("/biohpc"),
+        lambda: destination_state(storage, "/biohpc/data2"),
+    ):
         with pytest.raises(OSError, match="no mount root set"):
             call()
 
@@ -218,7 +285,10 @@ def ssh_stand_in(tmp_path) -> tuple[SshStorage, Path]:
     return storage, calls
 
 
-@pytest.mark.skipif(shutil.which("sh") is None or shutil.which("tar") is None, reason="needs sh and tar to stand in for ssh")
+@pytest.mark.skipif(
+    shutil.which("sh") is None or shutil.which("tar") is None,
+    reason="needs sh and tar to stand in for ssh",
+)
 def test_transfer_over_ssh_is_one_tar_and_keeps_folder_permissions(tmp_path):
     local = tmp_path / "local"
     (local / "session" / "plane0").mkdir(parents=True)
@@ -233,39 +303,63 @@ def test_transfer_over_ssh_is_one_tar_and_keeps_folder_permissions(tmp_path):
     storage, calls = ssh_stand_in(tmp_path)
     started = time.time()
 
-    transfer = Transfer(storage, [local / "session", local / "movie 5µm.tif"], str(dest), {"recording": "r"}, overwrite=True)
+    transfer = Transfer(
+        storage,
+        [local / "session", local / "movie 5µm.tif"],
+        str(dest),
+        {"recording": "r"},
+        overwrite=True,
+    )
     transfer.run()
 
     assert (dest / "session" / "plane0" / "data.bin").read_bytes() == b"x" * 3_000_000
-    assert (dest / "session" / "notes.txt").read_text() == "n" and (dest / "movie 5µm.tif").read_bytes() == b"tif"
-    assert json.loads((dest / f"session{SIDECAR_SUFFIX}").read_text())["source"] == str(local / "session")
+    assert (dest / "session" / "notes.txt").read_text() == "n" and (
+        dest / "movie 5µm.tif"
+    ).read_bytes() == b"tif"
+    assert json.loads((dest / f"session{SIDECAR_SUFFIX}").read_text())["source"] == str(
+        local / "session"
+    )
     assert transfer.done == transfer.total == 3_000_004
-    assert [oct(folder.stat().st_mode & 0o7777) for folder in (dest, dest / "session")] == [oct(0o2775)] * 2
+    assert [
+        oct(folder.stat().st_mode & 0o7777) for folder in (dest, dest / "session")
+    ] == [oct(0o2775)] * 2
     assert (dest / "movie 5µm.tif").stat().st_mtime >= started - 1
     commands = calls.read_text().splitlines()
     assert len(commands) == 2 and sum("tar -xmf" in c for c in commands) == 1
 
 
-@pytest.mark.skipif(shutil.which("sh") is None or shutil.which("tar") is None, reason="needs sh and tar to stand in for ssh")
+@pytest.mark.skipif(
+    shutil.which("sh") is None or shutil.which("tar") is None,
+    reason="needs sh and tar to stand in for ssh",
+)
 def test_transfer_over_ssh_checks_names_in_one_listing(tmp_path):
     sources = [tmp_path / f"{name}.tif" for name in "abc"]
     for source in sources:
         source.write_text("x")
     (tmp_path / "remote").mkdir()
     storage, calls = ssh_stand_in(tmp_path)
-    Transfer(storage, sources, str(tmp_path / "remote"), {"recording": "r"}, overwrite=False).run()
+    Transfer(
+        storage, sources, str(tmp_path / "remote"), {"recording": "r"}, overwrite=False
+    ).run()
     assert len(calls.read_text().splitlines()) == 4
     with pytest.raises(FileExistsError, match="b.tif already exists"):
-        Transfer(storage, [sources[1]], str(tmp_path / "remote"), None, overwrite=False).run()
+        Transfer(
+            storage, [sources[1]], str(tmp_path / "remote"), None, overwrite=False
+        ).run()
 
 
-@pytest.mark.skipif(shutil.which("sh") is None or shutil.which("tar") is None, reason="needs sh and tar to stand in for ssh")
+@pytest.mark.skipif(
+    shutil.which("sh") is None or shutil.which("tar") is None,
+    reason="needs sh and tar to stand in for ssh",
+)
 def test_transfer_over_ssh_reports_cancel_and_remote_errors(tmp_path):
     source = tmp_path / "big.bin"
     source.write_bytes(b"x" * (3 << 20))
     (tmp_path / "remote").mkdir()
     storage, _ = ssh_stand_in(tmp_path)
-    transfer = Transfer(storage, [source], str(tmp_path / "remote"), None, overwrite=True)
+    transfer = Transfer(
+        storage, [source], str(tmp_path / "remote"), None, overwrite=True
+    )
     transfer.cancelled = True
     with pytest.raises(InterruptedError, match="cancelled"):
         transfer.run()
@@ -273,14 +367,19 @@ def test_transfer_over_ssh_reports_cancel_and_remote_errors(tmp_path):
     failing = 'echo "** WARNING: connection is not using a post-quantum key exchange algorithm." >&2; echo "raw: Permission denied" >&2; exit 2'
     storage.base = ["sh", "-c", f'case "$0" in *tar*) {failing};; *) eval "$0";; esac']
     with pytest.raises(OSError, match="^raw: Permission denied$"):
-        Transfer(storage, [source], str(tmp_path / "remote"), None, overwrite=True).run()
+        Transfer(
+            storage, [source], str(tmp_path / "remote"), None, overwrite=True
+        ).run()
 
 
 def test_ssh_shares_a_connection_only_where_the_socket_fits(monkeypatch):
     monkeypatch.setattr("imgui_lab4_interface.storage.os.path.isdir", lambda path: True)
     monkeypatch.setattr(Path, "home", lambda: Path("/home/fo"))
     options = options_shared()
-    assert "ControlPath=/home/fo/.ssh/lab4-%C" in options and options == SshStorage("biohpc").base[-1 - len(options) : -1]
+    assert (
+        "ControlPath=/home/fo/.ssh/lab4-%C" in options
+        and options == SshStorage("biohpc").base[-1 - len(options) : -1]
+    )
     monkeypatch.setattr(Path, "home", lambda: Path("/home/" + "x" * 40))
     assert options_shared() == []
     monkeypatch.setattr(Path, "home", lambda: Path("/home/fo"))

@@ -28,7 +28,14 @@ def data_dir() -> Path:
 
 def this_computer() -> dict:
     """A machine entry for this computer with nothing to catalog yet."""
-    return {"name": platform.node() or "this computer", "reach": "local", "host": "", "mount_root": "", "mount_base": "/", "roots": []}
+    return {
+        "name": platform.node() or "this computer",
+        "reach": "local",
+        "host": "",
+        "mount_root": "",
+        "mount_base": "/",
+        "roots": [],
+    }
 
 
 @dataclasses.dataclass
@@ -61,7 +68,9 @@ class Settings:
     mount_base: str = "/biohpc"
     # the lab server's alias, as in pml_utilities
     ssh_host: str = "lab-research"
-    destinations: list = dataclasses.field(default_factory=lambda: [list(d) for d in DESTINATIONS])
+    destinations: list = dataclasses.field(
+        default_factory=lambda: [list(d) for d in DESTINATIONS]
+    )
     command_mbo: str = "mbo"
     command_masknmf: str = "masknmf"
     processing_host: str = "biohpc"

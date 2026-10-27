@@ -58,7 +58,10 @@ def shown(app: Lab4App, table: str, text: str) -> list[str]:
 
 
 def test_column_equals_matches_the_whole_value(app):
-    assert shown(app, "slices", "slice_id:hs260727.c") == ["HS260727.C", "HS260727.cells"]
+    assert shown(app, "slices", "slice_id:hs260727.c") == [
+        "HS260727.C",
+        "HS260727.cells",
+    ]
     assert shown(app, "slices", "slice_id=hs260727.c") == ["HS260727.C"]
 
 
@@ -69,8 +72,12 @@ def test_rows_the_filter_hides_are_unpicked(app):
     assert app.picked["slices"] == {ids["HS260727.C"]}
 
 
-def test_export_writes_the_table_shown_when_it_was_asked_for(app, tmp_path, monkeypatch):
-    monkeypatch.setattr(app_module.pfd, "save_file", lambda *args: SavedTo(str(tmp_path / "out.csv")))
+def test_export_writes_the_table_shown_when_it_was_asked_for(
+    app, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        app_module.pfd, "save_file", lambda *args: SavedTo(str(tmp_path / "out.csv"))
+    )
     app.tab_slices = "slices"
     app.act()
     app.tab_slices = "patients"
@@ -91,7 +98,11 @@ def test_opening_a_file_off_the_mount_says_why(app, tmp_path):
 def test_files_of_a_row_are_matched_once_per_change(app, monkeypatch):
     calls = []
     match = app_module.match_files
-    monkeypatch.setattr(app_module, "match_files", lambda files, pattern: calls.append(pattern) or match(files, pattern))
+    monkeypatch.setattr(
+        app_module,
+        "match_files",
+        lambda files, pattern: calls.append(pattern) or match(files, pattern),
+    )
     row = app.rows_slices["slices"][0]
     for _ in range(3):
         app.files_of("slices", row, row)
@@ -120,7 +131,11 @@ def test_double_clicking_a_cell_edits_it_or_says_why_not(app):
     row = app.rows_slices["slices"][0]
     app.user_slices = "dana"
     app.start_edit("slices", row, names.index("region"))
-    assert app.failed and app.message == "this row is shobhana's; only shobhana can edit it" and app.editing is None
+    assert (
+        app.failed
+        and app.message == "this row is shobhana's; only shobhana can edit it"
+        and app.editing is None
+    )
     app.start_edit("slices", row, names.index("owner"))
     assert app.message == "owner cannot be changed"
     app.user_slices = "shobhana"

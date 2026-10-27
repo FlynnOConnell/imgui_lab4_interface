@@ -22,7 +22,13 @@ from typing import Callable, Iterator, Optional
 
 from imgui_lab4_interface import processing
 from imgui_lab4_interface.config import Settings, data_dir
-from imgui_lab4_interface.storage import SIDECAR_SUFFIX, SUFFIX_VNOISER, Storage, machine_roots, open_machine
+from imgui_lab4_interface.storage import (
+    SIDECAR_SUFFIX,
+    SUFFIX_VNOISER,
+    Storage,
+    machine_roots,
+    open_machine,
+)
 
 SUFFIXES_TIFF = (".tif", ".tiff")
 SUFFIXES_HDF5 = (".h5", ".hdf5")
@@ -30,20 +36,43 @@ SUFFIX_TRACKING = "_roicat-tracking-manifest.json"
 NAME_VOLTAGE = "denoised_trace_scans.pkl"
 EVERY_RECORDS = 2000
 # files the Results page lists under a run or a recording
-SUFFIXES_RESULT = (".png", ".svg", ".jpg", ".jpeg", ".gif", ".webp", ".pdf", ".html", ".csv", ".tsv", ".mp4", ".webm", ".mov", ".avi")
+SUFFIXES_RESULT = (
+    ".png",
+    ".svg",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".pdf",
+    ".html",
+    ".csv",
+    ".tsv",
+    ".mp4",
+    ".webm",
+    ".mov",
+    ".avi",
+)
 # a unit exported from a .mesc, e.g. GT279-1_spine__MSession_0_MUnit_14.tiff
-PATTERN_TIFF_UNIT = re.compile(r"^(.+)__(MSession_\d+)_(MUnit_\d+)\.tiff?$", re.IGNORECASE)
+PATTERN_TIFF_UNIT = re.compile(
+    r"^(.+)__(MSession_\d+)_(MUnit_\d+)\.tiff?$", re.IGNORECASE
+)
 PATTERN_SESSION_UNIT = re.compile(r"(MSession_\d+)[/_](MUnit_\d+)")
 PATTERN_UNIT = re.compile(r"MUnit_\d+")
 PATTERN_STARTED_MASKNMF = re.compile(r"(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})")
-PATTERN_STARTED_VNOISER = re.compile(r"\.(\d{4})-(\d{2})-(\d{2})-(\d{2})-(\d{2})-\d{2}" + re.escape(SUFFIX_VNOISER) + "$")
+PATTERN_STARTED_VNOISER = re.compile(
+    r"\.(\d{4})-(\d{2})-(\d{2})-(\d{2})-(\d{2})-\d{2}" + re.escape(SUFFIX_VNOISER) + "$"
+)
 PATTERN_FRAME_RATE = re.compile(r"--frame-rate[ =]([0-9.]+)")
 PATTERN_ERROR = re.compile(r"\b\w*(Error|Exception)\b:")
 PATTERN_INDICATOR = re.compile(r"(?i)asap\d+|j?gcamp\w*|jrgeco\w*|voltron\w*")
 
 # kind: (viewer, args before the path, description)
 KINDS = {
-    "masknmf-run": ("masknmf", ["view"], "masknmf run folder: config.json and its results"),
+    "masknmf-run": (
+        "masknmf",
+        ["view"],
+        "masknmf run folder: config.json and its results",
+    ),
     "masknmf-results": ("masknmf", ["view"], "masknmf results file"),
     "roicat-tracking": ("masknmf", ["view"], "ROICaT tracking run across sessions"),
     "suite2p-run": ("mbo", [], "suite2p output holding plane folders"),
@@ -94,13 +123,17 @@ CREATE TABLE IF NOT EXISTS scans (
 """
 
 
-def classify_folder(name: str, files: set[str], subkinds: set[str]) -> tuple[Optional[str], str]:
+def classify_folder(
+    name: str, files: set[str], subkinds: set[str]
+) -> tuple[Optional[str], str]:
     """The kind of a folder and a detail line, from its name, its files' names and its subfolders' kinds."""
     if name.endswith(".zarr"):
         return "zarr", ""
     if any(f.endswith(SUFFIX_TRACKING) for f in files):
         return "roicat-tracking", ""
-    results = sorted(f for f in files if f.lower().endswith(SUFFIXES_HDF5) and "results" in f.lower())
+    results = sorted(
+        f for f in files if f.lower().endswith(SUFFIXES_HDF5) and "results" in f.lower()
+    )
     if "config.json" in files and results:
         return "masknmf-run", ", ".join(results)
     if NAME_VOLTAGE in files:
@@ -135,14 +168,18 @@ def ancestors(path: str) -> Iterator[str]:
 
 def stem(path: str) -> str:
     """A file or folder name without its extension, from a posix or Windows path."""
-    return posixpath.splitext(posixpath.basename(path.replace("\\", "/").rstrip("/")))[0]
+    return posixpath.splitext(posixpath.basename(path.replace("\\", "/").rstrip("/")))[
+        0
+    ]
 
 
 def format_started(match: Optional[re.Match]) -> str:
     return "{}-{}-{} {}:{}".format(*match.groups()) if match is not None else ""
 
 
-def read_runs(storage: Storage, folders: list[str], logs: dict[str, str]) -> list[tuple]:
+def read_runs(
+    storage: Storage, folders: list[str], logs: dict[str, str]
+) -> list[tuple]:
     """
     Runs rows for the folders whose config.json is a masknmf run manifest, with the last error line of failed runs.
 
@@ -161,12 +198,25 @@ def read_runs(storage: Storage, folders: list[str], logs: dict[str, str]) -> lis
         run = body.get("run") if isinstance(body.get("run"), dict) else {}
         data = (body.get("inputs") or {}).get("data") or {}
         rate = PATTERN_FRAME_RATE.search(run.get("command") or "")
-        started = format_started(PATTERN_STARTED_MASKNMF.match(run.get("started") or ""))
-        row = [folder, "masknmf-run", body.get("pipeline", ""), run.get("status", ""), started, data.get("path", "")]
-        runs.append(row + [float(rate.group(1)) if rate else None, "", logs.get(folder, "")])
+        started = format_started(
+            PATTERN_STARTED_MASKNMF.match(run.get("started") or "")
+        )
+        row = [
+            folder,
+            "masknmf-run",
+            body.get("pipeline", ""),
+            run.get("status", ""),
+            started,
+            data.get("path", ""),
+        ]
+        runs.append(
+            row + [float(rate.group(1)) if rate else None, "", logs.get(folder, "")]
+        )
     failed = {row[-1]: row for row in runs if row[3] == "failed" and row[-1]}
     for log, text in storage.read_texts(list(failed)).items():
-        errors = [line.strip() for line in text.splitlines() if PATTERN_ERROR.search(line)]
+        errors = [
+            line.strip() for line in text.splitlines() if PATTERN_ERROR.search(line)
+        ]
         failed[log][7] = errors[-1] if errors else ""
     return [tuple(row) for row in runs]
 
@@ -181,10 +231,17 @@ def read_units(storage: Storage, path: str, mtime: float) -> list[tuple]:
         units = []
     if not units:
         return [(path, "", recording, "", 0, None, None, mtime)]
-    return [(path, u.key, recording, u.role, u.method, u.frames, u.fs, mtime) for u in units]
+    return [
+        (path, u.key, recording, u.role, u.method, u.frames, u.fs, mtime) for u in units
+    ]
 
 
-def match_unit(paths: list[str], recordings: list[str], by_folder: dict[str, str], known: dict[str, set]) -> tuple[str, str]:
+def match_unit(
+    paths: list[str],
+    recordings: list[str],
+    by_folder: dict[str, str],
+    known: dict[str, set],
+) -> tuple[str, str]:
     """
     The (recording, unit) paths refer to, "" where unknown.
 
@@ -196,10 +253,18 @@ def match_unit(paths: list[str], recordings: list[str], by_folder: dict[str, str
     text = " ".join(paths)
     recording = next((r for r in recordings if r in text), "")
     if not recording:
-        recording = next((by_folder[a] for p in paths for a in ancestors(p) if by_folder.get(a)), "")
+        recording = next(
+            (by_folder[a] for p in paths for a in ancestors(p) if by_folder.get(a)), ""
+        )
     if not recording:
-        prefixes = {posixpath.basename(p).split("_MUnit")[0] for p in paths if "_MUnit" in posixpath.basename(p)}
-        candidates = {r for r in recordings for prefix in prefixes if r.startswith(prefix + "_")}
+        prefixes = {
+            posixpath.basename(p).split("_MUnit")[0]
+            for p in paths
+            if "_MUnit" in posixpath.basename(p)
+        }
+        candidates = {
+            r for r in recordings for prefix in prefixes if r.startswith(prefix + "_")
+        }
         recording = candidates.pop() if len(candidates) == 1 else ""
     pairs = PATTERN_SESSION_UNIT.findall(text)
     if pairs:
@@ -207,19 +272,30 @@ def match_unit(paths: list[str], recordings: list[str], by_folder: dict[str, str
     bare = PATTERN_UNIT.findall(text)
     if bare:
         candidates = [u for u in known.get(recording, ()) if u.endswith(f"/{bare[-1]}")]
-        return recording, candidates[0] if len(candidates) == 1 else f"MSession_0/{bare[-1]}"
+        return recording, candidates[0] if len(
+            candidates
+        ) == 1 else f"MSession_0/{bare[-1]}"
     return recording, ""
 
 
 def indicator(recording: str) -> str:
     """The indicator a recording's name gives, e.g. ASAP7 or jGCaMP8m; "" for none."""
     tokens = [t for t in recording.split("_") if PATTERN_INDICATOR.fullmatch(t)]
-    return "" if not tokens else tokens[0].upper() if tokens[0].lower().startswith("asap") else tokens[0]
+    return (
+        ""
+        if not tokens
+        else tokens[0].upper()
+        if tokens[0].lower().startswith("asap")
+        else tokens[0]
+    )
 
 
 def is_movie(unit: dict) -> bool:
     """Whether a units row is something a pipeline runs on: an exported unit, or a time series scan."""
-    return unit["role"] == "export" or (unit["role"] in (processing.ROLE_MEASUREMENT, "") and unit["method"] in processing.METHODS_MOVIE)
+    return unit["role"] == "export" or (
+        unit["role"] in (processing.ROLE_MEASUREMENT, "")
+        and unit["method"] in processing.METHODS_MOVIE
+    )
 
 
 def order_unit(unit: str) -> tuple:
@@ -240,7 +316,12 @@ class Catalog:
         db.row_factory = sqlite3.Row
         return db
 
-    def scan(self, storage: Storage, root: str, progress: Optional[Callable[[int], None]] = None) -> dict:
+    def scan(
+        self,
+        storage: Storage,
+        root: str,
+        progress: Optional[Callable[[int], None]] = None,
+    ) -> dict:
         """
         Walk root, classify everything, read sidecars, and replace the catalog rows under root.
 
@@ -255,8 +336,17 @@ class Catalog:
             n_records += 1
             if progress is not None and n_records % EVERY_RECORDS == 0:
                 progress(n_records)
-        sidecars = {r.path[: -len(SIDECAR_SUFFIX)]: r.path for rs in children.values() for r in rs if r.path.endswith(SIDECAR_SUFFIX)}
-        folders = sorted({root, *(r.path for rs in children.values() for r in rs if r.is_dir)}, key=lambda p: p.count("/"), reverse=True)
+        sidecars = {
+            r.path[: -len(SIDECAR_SUFFIX)]: r.path
+            for rs in children.values()
+            for r in rs
+            if r.path.endswith(SIDECAR_SUFFIX)
+        }
+        folders = sorted(
+            {root, *(r.path for rs in children.values() for r in rs if r.is_dir)},
+            key=lambda p: p.count("/"),
+            reverse=True,
+        )
 
         datasets, summaries, totals = [], [], {}
         configs, logs, vnoiser, units, results = [], {}, [], [], []
@@ -265,34 +355,86 @@ class Catalog:
             files = {posixpath.basename(r.path) for r in records if not r.is_dir}
             if "config.json" in files:
                 configs.append(folder)
-                logs[folder] = min((r.path for r in records if r.path.endswith(".log")), default="")
+                logs[folder] = min(
+                    (r.path for r in records if r.path.endswith(".log")), default=""
+                )
             if folder.endswith(SUFFIX_VNOISER):
-                vnoiser.append((folder, "vnoiser", "vnoiser", "done", format_started(PATTERN_STARTED_VNOISER.search(folder)), "", None, "", ""))
+                vnoiser.append(
+                    (
+                        folder,
+                        "vnoiser",
+                        "vnoiser",
+                        "done",
+                        format_started(PATTERN_STARTED_VNOISER.search(folder)),
+                        "",
+                        None,
+                        "",
+                        "",
+                    )
+                )
             for r in records:
                 name = posixpath.basename(r.path)
                 exported = None if r.is_dir else PATTERN_TIFF_UNIT.match(name)
                 if exported is not None:
-                    units.append((r.path, "/".join(exported.groups()[1:]), exported.group(1), "export", 0, None, None, r.mtime))
+                    units.append(
+                        (
+                            r.path,
+                            "/".join(exported.groups()[1:]),
+                            exported.group(1),
+                            "export",
+                            0,
+                            None,
+                            None,
+                            r.mtime,
+                        )
+                    )
                 if not r.is_dir and name.lower().endswith(SUFFIXES_RESULT):
                     results.append((r.path, r.size, r.mtime))
-            subkinds = {totals[r.path][4] for r in records if r.is_dir and r.path in totals}
+            subkinds = {
+                totals[r.path][4] for r in records if r.is_dir and r.path in totals
+            }
             kind, detail = classify_folder(posixpath.basename(folder), files, subkinds)
             n_files, size, mtime, kinds = 0, 0, 0.0, Counter()
             for r in records:
                 mtime = max(mtime, r.mtime)
                 if r.is_dir and r.path in totals:
                     sub_files, sub_size, sub_mtime, sub_kinds, _ = totals[r.path]
-                    n_files, size, mtime = n_files + sub_files, size + sub_size, max(mtime, sub_mtime)
+                    n_files, size, mtime = (
+                        n_files + sub_files,
+                        size + sub_size,
+                        max(mtime, sub_mtime),
+                    )
                     kinds += sub_kinds
                 elif not r.is_dir:
                     n_files, size = n_files + 1, size + r.size
                     file_kind = classify_file(posixpath.basename(r.path))
                     if file_kind is not None:
-                        datasets.append((r.path, folder, file_kind, "", 1, r.size, r.mtime))
+                        datasets.append(
+                            (r.path, folder, file_kind, "", 1, r.size, r.mtime)
+                        )
                         kinds[file_kind] += 1
-            summaries.append((folder, posixpath.dirname(folder), n_files, size, mtime, json.dumps(dict(kinds))))
+            summaries.append(
+                (
+                    folder,
+                    posixpath.dirname(folder),
+                    n_files,
+                    size,
+                    mtime,
+                    json.dumps(dict(kinds)),
+                )
+            )
             if kind is not None:
-                datasets.append((folder, posixpath.dirname(folder), kind, detail, n_files, size, mtime))
+                datasets.append(
+                    (
+                        folder,
+                        posixpath.dirname(folder),
+                        kind,
+                        detail,
+                        n_files,
+                        size,
+                        mtime,
+                    )
+                )
                 kinds[kind] += 1
             totals[folder] = (n_files, size, mtime, kinds, kind)
 
@@ -301,7 +443,10 @@ class Catalog:
         # .mesc headers read before, by path and mtime
         read = defaultdict(list)
         with closing(self.connect()) as db:
-            for row in db.execute("SELECT * FROM units WHERE storage = ? AND role != 'export' AND unit != ''", (label,)):
+            for row in db.execute(
+                "SELECT * FROM units WHERE storage = ? AND role != 'export' AND unit != ''",
+                (label,),
+            ):
                 read[(row["path"], row["mtime"])].append(tuple(row)[1:])
         for path, _, kind, _, _, _, mtime in datasets:
             if kind == "mesc":
@@ -317,49 +462,118 @@ class Catalog:
             if not isinstance(body, dict):
                 continue
             key = body.get("key") if isinstance(body.get("key"), dict) else {}
-            row = (target, body.get("recording", ""), key.get("subject_id", ""), key.get("session_datetime", ""), key.get("experimenter", ""))
+            row = (
+                target,
+                body.get("recording", ""),
+                key.get("subject_id", ""),
+                key.get("session_datetime", ""),
+                key.get("experimenter", ""),
+            )
             metadata.append((*row, json.dumps(body)))
 
         prefix = "/" if root == "/" else f"{root}/"
         seconds = time.perf_counter() - started
         with closing(self.connect()) as db, db:
-            for table in ("datasets", "folders", "metadata", "units", "runs", "results"):
-                db.execute(f"DELETE FROM {table} WHERE storage = ? AND (path = ? OR substr(path, 1, ?) = ?)", (label, root, len(prefix), prefix))
+            for table in (
+                "datasets",
+                "folders",
+                "metadata",
+                "units",
+                "runs",
+                "results",
+            ):
+                db.execute(
+                    f"DELETE FROM {table} WHERE storage = ? AND (path = ? OR substr(path, 1, ?) = ?)",
+                    (label, root, len(prefix), prefix),
+                )
             db.executemany(
                 "INSERT INTO datasets VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                [(label, p, parent, posixpath.basename(p), k, d, n, s, m, p in sidecars) for p, parent, k, d, n, s, m in datasets],
+                [
+                    (
+                        label,
+                        p,
+                        parent,
+                        posixpath.basename(p),
+                        k,
+                        d,
+                        n,
+                        s,
+                        m,
+                        p in sidecars,
+                    )
+                    for p, parent, k, d, n, s, m in datasets
+                ],
             )
             db.executemany(
                 "INSERT INTO folders VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                [(label, p, parent, posixpath.basename(p), n, s, m, k) for p, parent, n, s, m, k in summaries],
+                [
+                    (label, p, parent, posixpath.basename(p), n, s, m, k)
+                    for p, parent, n, s, m, k in summaries
+                ],
             )
-            db.executemany("INSERT INTO metadata VALUES (?, ?, ?, ?, ?, ?, ?)", [(label, *row) for row in metadata])
-            db.executemany("INSERT OR REPLACE INTO units VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", [(label, *row) for row in units])
-            db.executemany("INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '')", [(label, *row) for row in runs])
-            db.executemany("INSERT INTO results VALUES (?, ?, ?, ?, '', '', '')", [(label, *row) for row in results])
+            db.executemany(
+                "INSERT INTO metadata VALUES (?, ?, ?, ?, ?, ?, ?)",
+                [(label, *row) for row in metadata],
+            )
+            db.executemany(
+                "INSERT OR REPLACE INTO units VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [(label, *row) for row in units],
+            )
+            db.executemany(
+                "INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '')",
+                [(label, *row) for row in runs],
+            )
+            db.executemany(
+                "INSERT INTO results VALUES (?, ?, ?, ?, '', '', '')",
+                [(label, *row) for row in results],
+            )
             db.execute(
                 "INSERT OR REPLACE INTO scans VALUES (?, ?, ?, ?, ?)",
-                (label, root, datetime.now().isoformat(timespec="seconds"), n_records, seconds),
+                (
+                    label,
+                    root,
+                    datetime.now().isoformat(timespec="seconds"),
+                    n_records,
+                    seconds,
+                ),
             )
-        return {"root": root, "records": n_records, "datasets": len(datasets), "runs": len(runs), "units": len(units), "seconds": seconds}
+        return {
+            "root": root,
+            "records": n_records,
+            "datasets": len(datasets),
+            "runs": len(runs),
+            "units": len(units),
+            "seconds": seconds,
+        }
 
     def describe(self, storage_label: str, folder: str) -> dict:
         """The folder's summary, the latest scan covering it, and its items by name."""
         folder = folder.rstrip("/") or "/"
         with closing(self.connect()) as db:
-            summary = db.execute("SELECT * FROM folders WHERE storage = ? AND path = ?", (storage_label, folder)).fetchone()
+            summary = db.execute(
+                "SELECT * FROM folders WHERE storage = ? AND path = ?",
+                (storage_label, folder),
+            ).fetchone()
             scan = db.execute(
                 "SELECT * FROM scans WHERE storage = ? AND (root = ? OR root = '/' OR substr(?, 1, length(root) + 1) = root || '/') "
                 "ORDER BY scanned_at DESC LIMIT 1",
                 (storage_label, folder, folder),
             ).fetchone()
             items = {}
-            for row in db.execute("SELECT * FROM folders WHERE storage = ? AND parent = ? AND path != ?", (storage_label, folder, folder)):
+            for row in db.execute(
+                "SELECT * FROM folders WHERE storage = ? AND parent = ? AND path != ?",
+                (storage_label, folder, folder),
+            ):
                 items[row["name"]] = {**dict(row), "kinds": json.loads(row["kinds"])}
-            for row in db.execute("SELECT * FROM datasets WHERE storage = ? AND parent = ? AND path != ?", (storage_label, folder, folder)):
+            for row in db.execute(
+                "SELECT * FROM datasets WHERE storage = ? AND parent = ? AND path != ?",
+                (storage_label, folder, folder),
+            ):
                 items.setdefault(row["name"], {}).update(dict(row))
         return {
-            "folder": None if summary is None else {**dict(summary), "kinds": json.loads(summary["kinds"])},
+            "folder": None
+            if summary is None
+            else {**dict(summary), "kinds": json.loads(summary["kinds"])},
             "scan": None if scan is None else dict(scan),
             "items": items,
         }
@@ -375,19 +589,45 @@ class Catalog:
                 if row["path"].lower().endswith(".mesc"):
                     folder = posixpath.dirname(row["path"])
                     # a folder holding two recordings names neither
-                    by_folder[folder] = row["recording"] if by_folder.get(folder, row["recording"]) == row["recording"] else ""
+                    by_folder[folder] = (
+                        row["recording"]
+                        if by_folder.get(folder, row["recording"]) == row["recording"]
+                        else ""
+                    )
             recordings = sorted(recordings - {""}, key=lambda r: (-len(r), r))
             runs = {}
             for row in db.execute("SELECT storage, path, input FROM runs").fetchall():
-                recording, unit = match_unit([row["input"], row["path"]], recordings, by_folder, known)
-                runs[(row["storage"], row["path"])] = (recording or (stem(row["input"]) if row["input"] else ""), unit)
-            db.executemany("UPDATE runs SET recording = ?, unit = ? WHERE storage = ? AND path = ?", [(*named, *key) for key, named in runs.items()])
+                recording, unit = match_unit(
+                    [row["input"], row["path"]], recordings, by_folder, known
+                )
+                runs[(row["storage"], row["path"])] = (
+                    recording or (stem(row["input"]) if row["input"] else ""),
+                    unit,
+                )
+            db.executemany(
+                "UPDATE runs SET recording = ?, unit = ? WHERE storage = ? AND path = ?",
+                [(*named, *key) for key, named in runs.items()],
+            )
             linked = []
             for row in db.execute("SELECT storage, path FROM results").fetchall():
-                run = next((folder for folder in ancestors(row["path"]) if (row["storage"], folder) in runs), "")
-                named = runs[(row["storage"], run)] if run else match_unit([row["path"]], recordings, by_folder, known)
+                run = next(
+                    (
+                        folder
+                        for folder in ancestors(row["path"])
+                        if (row["storage"], folder) in runs
+                    ),
+                    "",
+                )
+                named = (
+                    runs[(row["storage"], run)]
+                    if run
+                    else match_unit([row["path"]], recordings, by_folder, known)
+                )
                 linked.append((run, *named, row["storage"], row["path"]))
-            db.executemany("UPDATE results SET run = ?, recording = ?, unit = ? WHERE storage = ? AND path = ?", linked)
+            db.executemany(
+                "UPDATE results SET run = ?, recording = ?, unit = ? WHERE storage = ? AND path = ?",
+                linked,
+            )
 
     def overview(self) -> dict:
         """
@@ -396,39 +636,106 @@ class Catalog:
         nothing used are left out, as is a recording's own row once its units are known.
         """
         with closing(self.connect()) as db:
-            units = [dict(row) for row in db.execute("SELECT * FROM units ORDER BY storage, path")]
-            runs = [dict(row) for row in db.execute("SELECT * FROM runs ORDER BY started DESC, path")]
-            results = [dict(row) for row in db.execute("SELECT * FROM results WHERE recording != '' ORDER BY path")]
-            labels = {(row["storage"], row["path"]): row["recording"] for row in db.execute("SELECT storage, path, recording FROM metadata")}
-            scans = [dict(row) for row in db.execute("SELECT * FROM scans ORDER BY storage, root")]
+            units = [
+                dict(row)
+                for row in db.execute("SELECT * FROM units ORDER BY storage, path")
+            ]
+            runs = [
+                dict(row)
+                for row in db.execute("SELECT * FROM runs ORDER BY started DESC, path")
+            ]
+            results = [
+                dict(row)
+                for row in db.execute(
+                    "SELECT * FROM results WHERE recording != '' ORDER BY path"
+                )
+            ]
+            labels = {
+                (row["storage"], row["path"]): row["recording"]
+                for row in db.execute("SELECT storage, path, recording FROM metadata")
+            }
+            scans = [
+                dict(row)
+                for row in db.execute("SELECT * FROM scans ORDER BY storage, root")
+            ]
         rows = {}
         for kind, items in (("data", units), ("runs", runs), ("results", results)):
             for item in items:
                 key = (item["recording"], item["unit"])
                 if key not in rows:
-                    rows[key] = {"recording": key[0], "unit": key[1], "fs": None, "frames": None, "lab4": "", "data": [], "runs": [], "results": []}
+                    rows[key] = {
+                        "recording": key[0],
+                        "unit": key[1],
+                        "fs": None,
+                        "frames": None,
+                        "lab4": "",
+                        "data": [],
+                        "runs": [],
+                        "results": [],
+                    }
                 rows[key][kind].append(item)
         for row in rows.values():
-            row["fs"] = next((d["fs"] for d in row["data"] + row["runs"] if d["fs"]), None)
-            row["frames"] = next((d["frames"] for d in row["data"] if d["frames"]), None)
-            row["lab4"] = next((labels[(d["storage"], d["path"])] for d in row["data"] if labels.get((d["storage"], d["path"]))), "")
+            row["fs"] = next(
+                (d["fs"] for d in row["data"] + row["runs"] if d["fs"]), None
+            )
+            row["frames"] = next(
+                (d["frames"] for d in row["data"] if d["frames"]), None
+            )
+            row["lab4"] = next(
+                (
+                    labels[(d["storage"], d["path"])]
+                    for d in row["data"]
+                    if labels.get((d["storage"], d["path"]))
+                ),
+                "",
+            )
             row["indicator"] = indicator(row["recording"])
             if not row["data"] and (row["recording"], "") in rows:
                 row["data"] = rows[(row["recording"], "")]["data"]
             if not row["data"]:
-                inputs = dict.fromkeys((run["storage"], run["input"]) for run in row["runs"] if run["input"])
-                row["data"] = [{"storage": storage, "path": path, "unit": row["unit"], "role": "input", "method": 0, "frames": None, "fs": None} for storage, path in inputs]
-            row["storages"] = sorted({d["storage"] for d in row["data"] + row["runs"] + row["results"]})
+                inputs = dict.fromkeys(
+                    (run["storage"], run["input"])
+                    for run in row["runs"]
+                    if run["input"]
+                )
+                row["data"] = [
+                    {
+                        "storage": storage,
+                        "path": path,
+                        "unit": row["unit"],
+                        "role": "input",
+                        "method": 0,
+                        "frames": None,
+                        "fs": None,
+                    }
+                    for storage, path in inputs
+                ]
+            row["storages"] = sorted(
+                {d["storage"] for d in row["data"] + row["runs"] + row["results"]}
+            )
         with_units = {recording for recording, unit in rows if unit}
         kept = [
             row
             for row in rows.values()
-            if row["runs"] or row["results"] or (row["unit"] and any(is_movie(d) for d in row["data"])) or (not row["unit"] and row["recording"] not in with_units)
+            if row["runs"]
+            or row["results"]
+            or (row["unit"] and any(is_movie(d) for d in row["data"]))
+            or (not row["unit"] and row["recording"] not in with_units)
         ]
-        return {"rows": sorted(kept, key=lambda row: (row["recording"].lower(), order_unit(row["unit"]))), "scans": scans}
+        return {
+            "rows": sorted(
+                kept,
+                key=lambda row: (row["recording"].lower(), order_unit(row["unit"])),
+            ),
+            "scans": scans,
+        }
 
 
-def scan_machines(catalog: Catalog, machines: list[dict], progress: Optional[Callable[[str, int], None]] = None) -> tuple[list[dict], list[str]]:
+def scan_machines(
+    catalog: Catalog,
+    machines: list[dict],
+    progress: Optional[Callable[[str, int], None]] = None,
+) -> tuple[list[dict], list[str]]:
     """
     Scan every root of machines, then link the whole catalog.
 
@@ -448,7 +755,18 @@ def scan_machines(catalog: Catalog, machines: list[dict], progress: Optional[Cal
             if progress is not None:
                 progress(where, 0)
             try:
-                found.append({"machine": machine["name"], **catalog.scan(storage, root, None if progress is None else functools.partial(progress, where))})
+                found.append(
+                    {
+                        "machine": machine["name"],
+                        **catalog.scan(
+                            storage,
+                            root,
+                            None
+                            if progress is None
+                            else functools.partial(progress, where),
+                        ),
+                    }
+                )
             except OSError as e:
                 failed.append(f"{where}: {e}")
     catalog.link()
@@ -457,18 +775,40 @@ def scan_machines(catalog: Catalog, machines: list[dict], progress: Optional[Cal
 
 def main() -> None:
     """`lab4-scan`: catalog the machines in Settings, e.g. from a timer, so the Results page is current."""
-    parser = argparse.ArgumentParser(prog="lab4-scan", description="Catalog the roots of the machines in Settings > Machines.")
-    parser.add_argument("names", nargs="*", help="machines to scan; all of them when none are named")
+    parser = argparse.ArgumentParser(
+        prog="lab4-scan",
+        description="Catalog the roots of the machines in Settings > Machines.",
+    )
+    parser.add_argument(
+        "names", nargs="*", help="machines to scan; all of them when none are named"
+    )
     args = parser.parse_args()
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
+    )
     settings = Settings.load()
-    unknown = sorted(set(args.names) - {machine["name"] for machine in settings.machines})
+    unknown = sorted(
+        set(args.names) - {machine["name"] for machine in settings.machines}
+    )
     if unknown:
-        parser.error(f"no machine named {', '.join(unknown)} in {data_dir() / 'settings.json'}")
+        parser.error(
+            f"no machine named {', '.join(unknown)} in {data_dir() / 'settings.json'}"
+        )
     catalog = Catalog()
-    found, failed = scan_machines(catalog, [m for m in settings.machines if not args.names or m["name"] in args.names])
+    found, failed = scan_machines(
+        catalog,
+        [m for m in settings.machines if not args.names or m["name"] in args.names],
+    )
     for scan in found:
-        logging.info("%s %s: %d items, %d runs, %d units (%.1f s)", scan["machine"], scan["root"], scan["records"], scan["runs"], scan["units"], scan["seconds"])
+        logging.info(
+            "%s %s: %d items, %d runs, %d units (%.1f s)",
+            scan["machine"],
+            scan["root"],
+            scan["records"],
+            scan["runs"],
+            scan["units"],
+            scan["seconds"],
+        )
     for line in failed:
         logging.warning("not scanned, last scan kept: %s", line)
     logging.info("catalog: %s", catalog.path)

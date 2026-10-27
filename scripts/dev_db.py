@@ -33,11 +33,21 @@ LAB_USER = "lab4_u_1"
 
 # names from lab4.tables lookups, so the Metadata page has realistic choices
 EXPERIMENTERS = ["Gergely Turi", "Eunji Kong", "Yu Xin", "Asako Noguchi"]
-DEVICES = [("Bruker 1 Imaging", "imaging"), ("Bruker 2 Imaging", "imaging"), ("AOD 1 Imaging", "imaging"), ("Mini2p Imaging", "imaging")]
+DEVICES = [
+    ("Bruker 1 Imaging", "imaging"),
+    ("Bruker 2 Imaging", "imaging"),
+    ("AOD 1 Imaging", "imaging"),
+    ("Mini2p Imaging", "imaging"),
+]
 
 
 def pg(*args: str, check: bool = True) -> subprocess.CompletedProcess:
-    return subprocess.run(["pixi", "exec", "-s", SPEC, "--", *args], check=check, capture_output=True, text=True)
+    return subprocess.run(
+        ["pixi", "exec", "-s", SPEC, "--", *args],
+        check=check,
+        capture_output=True,
+        text=True,
+    )
 
 
 def connect(credentials: dict, user_key: str = "DB_USER") -> psycopg.Connection:
@@ -62,8 +72,29 @@ def running() -> bool:
 def start() -> None:
     if not running():
         # the server inherits pg_ctl's handles; captured pipes would never reach EOF on Windows
-        command = ["pixi", "exec", "-s", SPEC, "--", "pg_ctl", "start", "-w", "-D", str(CLUSTER), "-l", str(LOG), "-o", f"-h {HOST} -p {PORT}"]
-        subprocess.run(command, check=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        command = [
+            "pixi",
+            "exec",
+            "-s",
+            SPEC,
+            "--",
+            "pg_ctl",
+            "start",
+            "-w",
+            "-D",
+            str(CLUSTER),
+            "-l",
+            str(LOG),
+            "-o",
+            f"-h {HOST} -p {PORT}",
+        ]
+        subprocess.run(
+            command,
+            check=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
 
 
 def stop() -> None:
@@ -77,36 +108,87 @@ def create(lab4: Path) -> None:
     pwfile = DEV / "pwfile"
     pwfile.write_text(password + "\n")
     try:
-        pg("initdb", "-D", str(CLUSTER), "-U", "postgres", "-E", "UTF8", "--auth=scram-sha-256", f"--pwfile={pwfile}")
+        pg(
+            "initdb",
+            "-D",
+            str(CLUSTER),
+            "-U",
+            "postgres",
+            "-E",
+            "UTF8",
+            "--auth=scram-sha-256",
+            f"--pwfile={pwfile}",
+        )
     finally:
         pwfile.unlink()
-    admin = {"DB_BACKEND": "postgresql", "DB_HOST": HOST, "DB_PORT": PORT, "DB_USER": "postgres", "DB_PASSWORD": password, "DB_NAME": "lab4", "DB_DATABASE": "postgres"}
+    admin = {
+        "DB_BACKEND": "postgresql",
+        "DB_HOST": HOST,
+        "DB_PORT": PORT,
+        "DB_USER": "postgres",
+        "DB_PASSWORD": password,
+        "DB_NAME": "lab4",
+        "DB_DATABASE": "postgres",
+    }
     write_json(ADMIN, admin)
     start()
     with connect(admin) as conn:
         conn.execute((lab4 / "ops" / "dev" / "001-fixtures.sql").read_text())
         for name in EXPERIMENTERS:
-            conn.execute('INSERT INTO lab4."#experimenter" (experimenter) VALUES (%s)', (name,))
+            conn.execute(
+                'INSERT INTO lab4."#experimenter" (experimenter) VALUES (%s)', (name,)
+            )
         for name, kind in DEVICES:
-            conn.execute('INSERT INTO lab4."#device" (device_name, device_type) VALUES (%s, %s)', (name, kind))
+            conn.execute(
+                'INSERT INTO lab4."#device" (device_name, device_type) VALUES (%s, %s)',
+                (name, kind),
+            )
     # --secrets is always explicit: migrate.py defaults to ~/.lab4/secrets.json, which may be production
     subprocess.run(
-        ["uv", "run", "--no-project", "--with", "psycopg2-binary==2.9.10", "python", str(lab4 / "scripts" / "migrate.py"), "--secrets", str(ADMIN)],
+        [
+            "uv",
+            "run",
+            "--no-project",
+            "--with",
+            "psycopg2-binary==2.9.10",
+            "python",
+            str(lab4 / "scripts" / "migrate.py"),
+            "--secrets",
+            str(ADMIN),
+        ],
         check=True,
     )
     lab_password = secrets.token_urlsafe(32)
     with connect(admin) as conn:
-        conn.execute("SELECT lab4_ops.provision_lab_user(%s, %s)", (LAB_USER, lab_password))
+        conn.execute(
+            "SELECT lab4_ops.provision_lab_user(%s, %s)", (LAB_USER, lab_password)
+        )
     write_json(
         SECRETS,
-        {"DB_BACKEND": "postgresql", "DB_HOST": HOST, "DB_NAME": "lab4", "DB_PORT": PORT, "BIOHPC_MOUNT": "/biohpc", "SCHEMA_CACHE_TTL": 5, "DB_USER": LAB_USER, "DB_PASSWORD": lab_password},
+        {
+            "DB_BACKEND": "postgresql",
+            "DB_HOST": HOST,
+            "DB_NAME": "lab4",
+            "DB_PORT": PORT,
+            "BIOHPC_MOUNT": "/biohpc",
+            "SCHEMA_CACHE_TTL": 5,
+            "DB_USER": LAB_USER,
+            "DB_PASSWORD": lab_password,
+        },
     )
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("command", choices=["up", "down", "reset"])
-    parser.add_argument("--lab4", type=Path, default=Path.home() / "repos" / "lab4", help="a Lab4 checkout to take fixtures and migrations from")
+    parser.add_argument(
+        "--lab4",
+        type=Path,
+        default=Path.home() / "repos" / "lab4",
+        help="a Lab4 checkout to take fixtures and migrations from",
+    )
     args = parser.parse_args()
     if args.command in ("down", "reset"):
         stop()

@@ -37,7 +37,9 @@ FLAGS_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
 def is_pruned(name: str) -> bool:
     """Whether walk lists a folder without entering it."""
-    return name.startswith(".") or (name.endswith(".zarr") and not name.endswith(SUFFIX_VNOISER))
+    return name.startswith(".") or (
+        name.endswith(".zarr") and not name.endswith(SUFFIX_VNOISER)
+    )
 
 
 def options_shared() -> list[str]:
@@ -50,16 +52,34 @@ def options_shared() -> list[str]:
     path = f"{folder}/lab4-%C"
     # %C expands to 40 characters, and ssh binds the socket as <path>.<16 random characters> first
     too_long = len(path) - len("%C") + 40 + 17 > LENGTH_SOCKET
-    if sys.platform == "win32" or not os.path.isdir(folder) or too_long or any(c in folder for c in " %"):
+    if (
+        sys.platform == "win32"
+        or not os.path.isdir(folder)
+        or too_long
+        or any(c in folder for c in " %")
+    ):
         return []
-    return ["-o", "ControlMaster=auto", "-o", f"ControlPath={path}", "-o", f"ControlPersist={SECONDS_SHARED}"]
+    return [
+        "-o",
+        "ControlMaster=auto",
+        "-o",
+        f"ControlPath={path}",
+        "-o",
+        f"ControlPersist={SECONDS_SHARED}",
+    ]
 
 
 def ssh_error(text: str) -> str:
     """The first lines of ssh's stderr, without OpenSSH's ** notices, e.g. that the server lacks post-quantum keys."""
-    lines = [line for line in text.strip().splitlines() if line.strip() and not line.startswith("**")]
+    lines = [
+        line
+        for line in text.strip().splitlines()
+        if line.strip() and not line.startswith("**")
+    ]
     more = len(lines) - LINES_ERROR
-    return "\n".join(lines[:LINES_ERROR] + ([f"... and {more} more"] if more > 0 else []))
+    return "\n".join(
+        lines[:LINES_ERROR] + ([f"... and {more} more"] if more > 0 else [])
+    )
 
 
 class Entry(NamedTuple):
@@ -124,7 +144,9 @@ class MountedStorage:
     def __init__(self, root: str, base: str = "/", label: Optional[str] = None):
         self.root = Path(root)
         self.base = "/" + base.strip("/")
-        self.label = label or (f"{root} ({self.base})" if str(root) else "no mount root")
+        self.label = label or (
+            f"{root} ({self.base})" if str(root) else "no mount root"
+        )
 
     def local(self, path: str) -> Path:
         if str(self.root) == ".":
@@ -143,7 +165,10 @@ class MountedStorage:
         return self.local(path).exists()
 
     def listdir(self, path: str) -> list[Entry]:
-        entries = [Entry(p.name, p.is_dir(), 0 if p.is_dir() else p.stat().st_size) for p in self.local(path).iterdir()]
+        entries = [
+            Entry(p.name, p.is_dir(), 0 if p.is_dir() else p.stat().st_size)
+            for p in self.local(path).iterdir()
+        ]
         return sorted(entries, key=lambda e: (not e.is_dir, e.name.lower()))
 
     def read_text(self, path: str) -> str:
@@ -201,7 +226,12 @@ class SshReader:
 
     def __init__(self, base: list[str], path: str):
         self.path = path
-        self.proc = subprocess.Popen([*base, f"cat {shlex.quote(path)}"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=FLAGS_NO_WINDOW)
+        self.proc = subprocess.Popen(
+            [*base, f"cat {shlex.quote(path)}"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            creationflags=FLAGS_NO_WINDOW,
+        )
 
     def read(self, n: int) -> bytes:
         return self.proc.stdout.read(n)
@@ -210,7 +240,10 @@ class SshReader:
         self.proc.stdout.close()
         code = self.proc.wait()
         if code != 0:
-            raise OSError(ssh_error(self.proc.stderr.read().decode(errors="replace")) or f"reading {self.path} failed")
+            raise OSError(
+                ssh_error(self.proc.stderr.read().decode(errors="replace"))
+                or f"reading {self.path} failed"
+            )
 
     def __enter__(self) -> "SshReader":
         return self
@@ -229,11 +262,19 @@ class SshWriter:
     """Streams into a remote command, `cat > path` by default; close raises if it failed."""
 
     def __init__(self, base: list[str], path: str, command: Optional[str] = None):
-        command = command or f"mkdir -p {shlex.quote(posixpath.dirname(path))} && cat > {shlex.quote(path)}"
+        command = (
+            command
+            or f"mkdir -p {shlex.quote(posixpath.dirname(path))} && cat > {shlex.quote(path)}"
+        )
         self.path = path
         # a file, not a pipe: tar reports an error per file, and a full pipe would stall ssh mid-write
         self.errors = tempfile.TemporaryFile()
-        self.proc = subprocess.Popen([*base, command], stdin=subprocess.PIPE, stderr=self.errors, creationflags=FLAGS_NO_WINDOW)
+        self.proc = subprocess.Popen(
+            [*base, command],
+            stdin=subprocess.PIPE,
+            stderr=self.errors,
+            creationflags=FLAGS_NO_WINDOW,
+        )
 
     def write(self, chunk: bytes) -> None:
         self.proc.stdin.write(chunk)
@@ -296,7 +337,9 @@ class SshTar:
     """
 
     def __init__(self, base: list[str], dest: str):
-        self.writer = SshWriter(base, dest, command=f"cd {shlex.quote(dest)} && tar -xmf -")
+        self.writer = SshWriter(
+            base, dest, command=f"cd {shlex.quote(dest)} && tar -xmf -"
+        )
         self.tar = tarfile.open(fileobj=self.writer, mode="w|")
 
     def add(self, relative: str, size: int, src: BinaryIO) -> None:
@@ -326,28 +369,53 @@ class SshStorage:
         self.host = host
         self.label = label or f"ssh {host}"
         self.base = [
-            "ssh", "-o", "BatchMode=yes", "-o", f"ConnectTimeout={TIMEOUT_SSH}", "-o", "StrictHostKeyChecking=accept-new",
-            "-o", f"ServerAliveInterval={TIMEOUT_SSH}", "-o", "ServerAliveCountMax=3", *options_shared(), host,
+            "ssh",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            f"ConnectTimeout={TIMEOUT_SSH}",
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            "-o",
+            f"ServerAliveInterval={TIMEOUT_SSH}",
+            "-o",
+            "ServerAliveCountMax=3",
+            *options_shared(),
+            host,
         ]
 
     def run(self, command: str, timeout: float = 4 * TIMEOUT_SSH) -> str:
         try:
             # remote names are utf-8; the Windows locale would misread them
-            result = subprocess.run([*self.base, command], capture_output=True, encoding="utf-8", errors="replace", timeout=timeout, creationflags=FLAGS_NO_WINDOW)
+            result = subprocess.run(
+                [*self.base, command],
+                capture_output=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout,
+                creationflags=FLAGS_NO_WINDOW,
+            )
         except (FileNotFoundError, subprocess.TimeoutExpired) as e:
             raise OSError(f"ssh {self.host}: {e}") from e
         if result.returncode != 0:
-            raise OSError(ssh_error(result.stderr) or f"ssh {self.host} exited {result.returncode}")
+            raise OSError(
+                ssh_error(result.stderr)
+                or f"ssh {self.host} exited {result.returncode}"
+            )
         return result.stdout
 
     def check(self) -> None:
         self.run("true")
 
     def exists(self, path: str) -> bool:
-        return self.run(f"test -e {shlex.quote(path)} && echo y || echo n").strip() == "y"
+        return (
+            self.run(f"test -e {shlex.quote(path)} && echo y || echo n").strip() == "y"
+        )
 
     def listdir(self, path: str) -> list[Entry]:
-        out = self.run(f"find {shlex.quote(path)} -mindepth 1 -maxdepth 1 -printf '%y\\t%s\\t%f\\n'")
+        out = self.run(
+            f"find {shlex.quote(path)} -mindepth 1 -maxdepth 1 -printf '%y\\t%s\\t%f\\n'"
+        )
         entries = []
         for line in out.splitlines():
             kind, size, name = line.split("\t", 2)
@@ -360,8 +428,13 @@ class SshStorage:
     def read_texts(self, paths: list[str]) -> dict[str, str]:
         texts = {}
         for start in range(0, len(paths), FILES_PER_CAT):
-            quoted = " ".join(shlex.quote(path) for path in paths[start : start + FILES_PER_CAT])
-            out = self.run(f"for f in {quoted}; do test -r \"$f\" && printf '\\036%s\\037' \"$f\" && cat -- \"$f\"; done; true", timeout=TIMEOUT_WALK)
+            quoted = " ".join(
+                shlex.quote(path) for path in paths[start : start + FILES_PER_CAT]
+            )
+            out = self.run(
+                f'for f in {quoted}; do test -r "$f" && printf \'\\036%s\\037\' "$f" && cat -- "$f"; done; true',
+                timeout=TIMEOUT_WALK,
+            )
             for chunk in out.split("\x1e")[1:]:
                 path, _, text = chunk.partition("\x1f")
                 texts[path] = text
@@ -382,12 +455,17 @@ class SshStorage:
     def walk(self, root: str) -> Iterator[Record]:
         fmt = r"'%y\t%s\t%T@\t%p\n'"
         prune = rf"\( -type d \( -name '.*' -o \( -name '*.zarr' ! -name '*{SUFFIX_VNOISER}' \) \)"
-        out = self.run(f"find {shlex.quote(root)} -mindepth 1 {prune} -printf {fmt} -prune \\) -o -printf {fmt}", timeout=TIMEOUT_WALK)
+        out = self.run(
+            f"find {shlex.quote(root)} -mindepth 1 {prune} -printf {fmt} -prune \\) -o -printf {fmt}",
+            timeout=TIMEOUT_WALK,
+        )
         for line in out.splitlines():
             parts = line.split("\t", 3)
             if len(parts) == 4:
                 kind, size, mtime, path = parts
-                yield Record(path, kind == "d", 0 if kind == "d" else int(size), float(mtime))
+                yield Record(
+                    path, kind == "d", 0 if kind == "d" else int(size), float(mtime)
+                )
 
     def local_path(self, path: str) -> Optional[Path]:
         return None
@@ -402,7 +480,12 @@ class Mount(NamedTuple):
 
 def shows(remote: str, base: str) -> bool:
     """Whether a remote share names base, e.g. \\\\sshfs.kr\\me@host!2216\\biohpc or me@host:/biohpc for /biohpc."""
-    return remote.replace("\\", "/").rstrip("/").lower().endswith("/" + base.strip("/").lower())
+    return (
+        remote.replace("\\", "/")
+        .rstrip("/")
+        .lower()
+        .endswith("/" + base.strip("/").lower())
+    )
 
 
 def mapped_drives() -> list[Mount]:
@@ -418,7 +501,10 @@ def mapped_drives() -> list[Mount]:
             continue
         buffer, size = ctypes.create_unicode_buffer(1024), ctypes.c_ulong(1024)
         # 1201: mapped but disconnected; the share is still named
-        if mpr.WNetGetConnectionW(f"{letter}:", buffer, ctypes.byref(size)) in (0, 1201):
+        if mpr.WNetGetConnectionW(f"{letter}:", buffer, ctypes.byref(size)) in (
+            0,
+            1201,
+        ):
             found.append(Mount(f"{letter}:\\", buffer.value))
     return found
 
@@ -426,7 +512,9 @@ def mapped_drives() -> list[Mount]:
 def mounted_shares() -> list[Mount]:
     """Mounts listed by `mount` (Linux, macOS): `source on target type ...` or `source on target (...)`."""
     try:
-        out = subprocess.run(["mount"], capture_output=True, text=True, timeout=TIMEOUT_SSH).stdout
+        out = subprocess.run(
+            ["mount"], capture_output=True, text=True, timeout=TIMEOUT_SSH
+        ).stdout
     except (OSError, subprocess.TimeoutExpired):
         return []
     found = []
@@ -455,7 +543,11 @@ def open_machine(machine: dict) -> Storage:
     if machine["reach"] == "ssh":
         return SshStorage(machine["host"], label=machine["name"])
     if machine["reach"] == "mounted":
-        return MountedStorage(os.path.expanduser(machine["mount_root"]), machine["mount_base"], label=machine["name"])
+        return MountedStorage(
+            os.path.expanduser(machine["mount_root"]),
+            machine["mount_base"],
+            label=machine["name"],
+        )
     return MountedStorage(Path.home().anchor, "/", label=machine["name"])
 
 
@@ -464,7 +556,10 @@ def machine_roots(machine: dict) -> list[str]:
     roots = [root.strip() for root in machine["roots"] if root.strip()]
     if machine["reach"] != "local":
         return roots
-    return ["/" + Path(os.path.expanduser(root)).relative_to(Path.home().anchor).as_posix() for root in roots]
+    return [
+        "/" + Path(os.path.expanduser(root)).relative_to(Path.home().anchor).as_posix()
+        for root in roots
+    ]
 
 
 def destination_state(storage: Storage, path: str) -> tuple[str, str]:
@@ -472,7 +567,9 @@ def destination_state(storage: Storage, path: str) -> tuple[str, str]:
     parent, name = posixpath.split(path.rstrip("/"))
     parent = parent or "/"
     if not storage.exists(parent):
-        raise OSError(f"{parent} does not exist; a transfer makes at most one new folder")
+        raise OSError(
+            f"{parent} does not exist; a transfer makes at most one new folder"
+        )
     for entry in storage.listdir(parent):
         if entry.name == name:
             if not entry.is_dir:
@@ -489,7 +586,9 @@ def download(storage: Storage, path: str, local: Path, progress: dict) -> Path:
         with storage.open_read(path) as src, part.open("wb") as dst:
             while chunk := src.read(SIZE_CHUNK):
                 if progress.get("cancelled"):
-                    raise InterruptedError(f"copy of {posixpath.basename(path)} cancelled")
+                    raise InterruptedError(
+                        f"copy of {posixpath.basename(path)} cancelled"
+                    )
                 dst.write(chunk)
                 progress["done"] += len(chunk)
     except BaseException:
@@ -515,7 +614,14 @@ class Transfer:
         overwrite (bool): Replace existing files instead of stopping
     """
 
-    def __init__(self, storage: Storage, sources: list[Path], dest: str, metadata: Optional[dict], overwrite: bool):
+    def __init__(
+        self,
+        storage: Storage,
+        sources: list[Path],
+        dest: str,
+        metadata: Optional[dict],
+        overwrite: bool,
+    ):
         self.storage = storage
         self.sources = sources
         self.dest = dest.rstrip("/")
@@ -539,11 +645,22 @@ class Transfer:
         for source in self.sources:
             target = f"{self.dest}/{source.name}"
             if source.name in names_taken:
-                raise FileExistsError(f"{target} already exists; tick overwrite to replace it")
-            if self.metadata is not None and f"{source.name}{SIDECAR_SUFFIX}" in names_taken:
-                raise FileExistsError(f"{target}{SIDECAR_SUFFIX} already exists; tick overwrite to replace it")
+                raise FileExistsError(
+                    f"{target} already exists; tick overwrite to replace it"
+                )
+            if (
+                self.metadata is not None
+                and f"{source.name}{SIDECAR_SUFFIX}" in names_taken
+            ):
+                raise FileExistsError(
+                    f"{target}{SIDECAR_SUFFIX} already exists; tick overwrite to replace it"
+                )
             if source.is_dir():
-                plan += [(p, f"{source.name}/{p.relative_to(source).as_posix()}") for p in sorted(source.rglob("*")) if p.is_file()]
+                plan += [
+                    (p, f"{source.name}/{p.relative_to(source).as_posix()}")
+                    for p in sorted(source.rglob("*"))
+                    if p.is_file()
+                ]
             else:
                 plan.append((source, source.name))
         self.total = sum(p.stat().st_size for p, _ in plan)
@@ -552,11 +669,17 @@ class Transfer:
             for local, relative in plan:
                 self.current = f"{self.dest}/{relative}"
                 with local.open("rb") as src:
-                    tree.add(relative, local.stat().st_size, Counted(transfer=self, src=src))
+                    tree.add(
+                        relative, local.stat().st_size, Counted(transfer=self, src=src)
+                    )
             if self.metadata is not None:
                 for source in self.sources:
-                    text = json.dumps({**self.metadata, "source": str(source)}, indent=2).encode()
-                    tree.add(f"{source.name}{SIDECAR_SUFFIX}", len(text), io.BytesIO(text))
+                    text = json.dumps(
+                        {**self.metadata, "source": str(source)}, indent=2
+                    ).encode()
+                    tree.add(
+                        f"{source.name}{SIDECAR_SUFFIX}", len(text), io.BytesIO(text)
+                    )
         self.current = ""
 
 

@@ -92,9 +92,13 @@ def list_units(path: Path) -> list[MescUnit]:
     """Units with a Channel_0, in number order."""
     units = []
     with h5py.File(path, "r") as f:
-        for name_session in sorted((k for k in f if k.startswith("MSession")), key=number):
+        for name_session in sorted(
+            (k for k in f if k.startswith("MSession")), key=number
+        ):
             session = f[name_session]
-            for name_unit in sorted((k for k in session if k.startswith("MUnit")), key=number):
+            for name_unit in sorted(
+                (k for k in session if k.startswith("MUnit")), key=number
+            ):
                 unit = session[name_unit]
                 if "Channel_0" not in unit:
                     continue
@@ -135,7 +139,10 @@ def find_mesc(sources: list[Path]) -> list[tuple[Path, str]]:
         if source.is_file() and source.suffix.lower() == SUFFIX_MESC:
             found.append((source, source.name))
         elif source.is_dir():
-            found += [(p, f"{source.name}/{p.relative_to(source).as_posix()}") for p in sorted(source.rglob(f"*{SUFFIX_MESC}", case_sensitive=False))]
+            found += [
+                (p, f"{source.name}/{p.relative_to(source).as_posix()}")
+                for p in sorted(source.rglob(f"*{SUFFIX_MESC}", case_sensitive=False))
+            ]
     return found
 
 
@@ -209,7 +216,9 @@ def check_landed(storage: Storage, records: list[dict]) -> None:
         found = {e.name: e.size for e in storage.listdir(posixpath.dirname(mesc))}
         name = posixpath.basename(mesc)
         if found.get(name) != size:
-            raise OSError(f"{mesc} is {found.get(name, 'missing')} bytes on BioHPC, {size} here; not processing it")
+            raise OSError(
+                f"{mesc} is {found.get(name, 'missing')} bytes on BioHPC, {size} here; not processing it"
+            )
 
 
 def new_record(job: Job, params: Asap7Params) -> dict:
@@ -224,7 +233,9 @@ def new_record(job: Job, params: Asap7Params) -> dict:
     }
 
 
-def submit(run, settings: Settings, jobs: list[Job], params: Asap7Params, storage: Storage) -> list[dict]:
+def submit(
+    run, settings: Settings, jobs: list[Job], params: Asap7Params, storage: Storage
+) -> list[dict]:
     """
     Save one waiting job per unit to jobs.json, then submit them; any that fail stay waiting.
 
@@ -235,14 +246,23 @@ def submit(run, settings: Settings, jobs: list[Job], params: Asap7Params, storag
     return submit_waiting(run, settings, records, storage)
 
 
-def submit_waiting(run, settings: Settings, records: list[dict], storage: Storage) -> list[dict]:
+def submit_waiting(
+    run, settings: Settings, records: list[dict], storage: Storage
+) -> list[dict]:
     """Check the files landed, then submit each job, saving its id to jobs.json."""
     check_landed(storage, records)
     for record in records:
         job = Job(record["local"], record["mesc"], record["unit"], record["dir_save"])
-        record["job_id"] = parse_job_id(run(sbatch_command(settings, job, Asap7Params(**record["params"]))))
+        record["job_id"] = parse_job_id(
+            run(sbatch_command(settings, job, Asap7Params(**record["params"])))
+        )
         record["submitted_at"] = datetime.now().isoformat(timespec="seconds")
-        save_jobs([record if entry["dir_save"] == record["dir_save"] else entry for entry in load_jobs()])
+        save_jobs(
+            [
+                record if entry["dir_save"] == record["dir_save"] else entry
+                for entry in load_jobs()
+            ]
+        )
     return records
 
 
@@ -273,7 +293,9 @@ def job_states(run, job_ids: list[str]) -> dict[str, str]:
     job_ids = [job_id for job_id in job_ids if job_id]
     if not job_ids:
         return {}
-    out = run(f"sacct -n -X -P --format={FIELDS_SACCT} -j {','.join(map(shlex.quote, job_ids))}")
+    out = run(
+        f"sacct -n -X -P --format={FIELDS_SACCT} -j {','.join(map(shlex.quote, job_ids))}"
+    )
     states = {}
     for line in out.splitlines():
         parts = line.split("|")

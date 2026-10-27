@@ -25,7 +25,13 @@ def format_datetime(when: datetime) -> str:
 
 def text_of(value) -> str:
     """A database value as the form shows it; empty for NULL."""
-    return "" if value is None else format_datetime(value) if isinstance(value, datetime) else str(value)
+    return (
+        ""
+        if value is None
+        else format_datetime(value)
+        if isinstance(value, datetime)
+        else str(value)
+    )
 
 
 @dataclasses.dataclass
@@ -44,7 +50,9 @@ class Recording:
     experimenter: str = ""
     collection_name: str = ""
     subject_id: str = ""
-    session_datetime: str = dataclasses.field(default_factory=lambda: datetime.now().strftime("%Y-%m-%d %H:%M"))
+    session_datetime: str = dataclasses.field(
+        default_factory=lambda: datetime.now().strftime("%Y-%m-%d %H:%M")
+    )
     device_name: str = ""
     ui_label: str = ""
     weight_g: str = ""
@@ -61,7 +69,9 @@ class Recording:
             experimenter=key.get("experimenter", ""),
             collection_name=key.get("collection_name", ""),
             subject_id=key.get("subject_id", ""),
-            session_datetime=format_datetime(when) if when else str(key.get("session_datetime", "")),
+            session_datetime=format_datetime(when)
+            if when
+            else str(key.get("session_datetime", "")),
             device_name=key.get("device_name", ""),
             ui_label=sidecar.get("ui_label", ""),
             weight_g=str(sidecar.get("weight_g", "")),
@@ -71,7 +81,9 @@ class Recording:
         )
 
     @classmethod
-    def from_lab4(cls, recording: dict, notes: str, subject_fields: dict) -> "Recording":
+    def from_lab4(
+        cls, recording: dict, notes: str, subject_fields: dict
+    ) -> "Recording":
         """A Lab4 recording row, its session's notes and its subject's columns other than the key."""
         return cls(
             experimenter=recording["experimenter"],
@@ -88,7 +100,9 @@ class Recording:
     def label(self) -> str:
         """e.g. M231_2026-08-21_1430_Bruker 1 Imaging"""
         when = parse_datetime(self.session_datetime)
-        stamp = when.strftime("%Y-%m-%d_%H%M") if when else self.session_datetime.strip()
+        stamp = (
+            when.strftime("%Y-%m-%d_%H%M") if when else self.session_datetime.strip()
+        )
         return f"{self.subject_id.strip() or 'subject'}_{stamp}_{self.device_name.strip() or 'device'}"
 
     def key(self) -> dict:
@@ -103,7 +117,16 @@ class Recording:
 
     def problems(self) -> list[str]:
         """Problems with the key itself, without the database."""
-        found = [f"{name} is empty" for name, value in (("experimenter", self.experimenter), ("experiment group", self.collection_name), ("subject", self.subject_id), ("device", self.device_name)) if not value.strip()]
+        found = [
+            f"{name} is empty"
+            for name, value in (
+                ("experimenter", self.experimenter),
+                ("experiment group", self.collection_name),
+                ("subject", self.subject_id),
+                ("device", self.device_name),
+            )
+            if not value.strip()
+        ]
         if parse_datetime(self.session_datetime) is None:
             found.append("session time must be YYYY-MM-DD HH:MM")
         if self.weight_g.strip():
@@ -118,10 +141,17 @@ class Recording:
         when = parse_datetime(self.session_datetime)
         return {
             "recording": self.label(),
-            "key": {**self.key(), "session_datetime": when.isoformat(sep=" ") if when else self.session_datetime.strip()},
+            "key": {
+                **self.key(),
+                "session_datetime": when.isoformat(sep=" ")
+                if when
+                else self.session_datetime.strip(),
+            },
             "ui_label": self.ui_label.strip(),
             "weight_g": self.weight_g.strip(),
-            "subject": {k: v.strip() for k, v in self.subject_fields.items() if v.strip()},
+            "subject": {
+                k: v.strip() for k, v in self.subject_fields.items() if v.strip()
+            },
             "notes": self.notes,
             "extra": {k.strip(): v for k, v in self.extra if k.strip()},
             "written_by": user,

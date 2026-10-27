@@ -4,7 +4,15 @@ from contextlib import closing
 
 import pytest
 
-from imgui_lab4_interface.slices import ADMIN, COLUMNS, ROOT, SEED_SLICES, SliceDatabase, file_dates, match_files
+from imgui_lab4_interface.slices import (
+    ADMIN,
+    COLUMNS,
+    ROOT,
+    SEED_SLICES,
+    SliceDatabase,
+    file_dates,
+    match_files,
+)
 from imgui_lab4_interface.storage import MountedStorage
 
 # a sample of the names under ROOT on BioHPC
@@ -45,23 +53,41 @@ def test_dates_in_every_spelling():
 
 
 def test_match_by_date_words_and_exclusions():
-    assert names("2026-07-27 _b_") == ["Images/H_slice/HSLice_B_7-27-2026.mesc", "Images/Shobhana_Camera/H_slice/HSLice_B_7-27-2026.mesc"]
-    assert names("2026-07-27 -_b_ -_d_ -24hrs -cell") == ["Images/H_slice/HSLice_7-27-2026.mesc", "Images/H_slice/HSlice_260727_Alexa488.png"]
-    assert names("2026-08-31 -day9 -egfp") == ["Ephys/Shobhana_Data/SS_Ephys_HSlice_8-31-2026.pxp", "Images/H_slice/HSlice_8-31-2026.mesc"]
+    assert names("2026-07-27 _b_") == [
+        "Images/H_slice/HSLice_B_7-27-2026.mesc",
+        "Images/Shobhana_Camera/H_slice/HSLice_B_7-27-2026.mesc",
+    ]
+    assert names("2026-07-27 -_b_ -_d_ -24hrs -cell") == [
+        "Images/H_slice/HSLice_7-27-2026.mesc",
+        "Images/H_slice/HSlice_260727_Alexa488.png",
+    ]
+    assert names("2026-08-31 -day9 -egfp") == [
+        "Ephys/Shobhana_Data/SS_Ephys_HSlice_8-31-2026.pxp",
+        "Images/H_slice/HSlice_8-31-2026.mesc",
+    ]
     assert names("") == []
 
 
 def test_every_seed_slice_finds_its_files():
     for slice_id, *_, pattern, _ in SEED_SLICES:
         found = match_files(FILES, pattern)
-        assert all("hslice" in f["path"].lower() or "ephys" in f["path"].lower() for f in found), slice_id
+        assert all(
+            "hslice" in f["path"].lower() or "ephys" in f["path"].lower() for f in found
+        ), slice_id
 
 
 def test_seeds_once_and_the_same(tmp_path):
     db = SliceDatabase(tmp_path / "a.sqlite")
     patients, slices = db.rows("patients"), db.rows("slices")
-    assert [p["patient_id"] for p in patients] == ["HS260727", "HS260831", "HS260914", "HS260918"]
-    assert len(slices) == len(SEED_SLICES) and all(s["collection_date"] and s["file_match"] for s in slices)
+    assert [p["patient_id"] for p in patients] == [
+        "HS260727",
+        "HS260831",
+        "HS260914",
+        "HS260918",
+    ]
+    assert len(slices) == len(SEED_SLICES) and all(
+        s["collection_date"] and s["file_match"] for s in slices
+    )
     assert db.rows("assays") == []
     assert SliceDatabase(tmp_path / "a.sqlite").rows("slices") == slices
 
@@ -87,9 +113,17 @@ def test_index_lists_without_changing_anything(tmp_path):
     db = SliceDatabase(tmp_path / "s.sqlite")
     storage = MountedStorage(str(tmp_path))
     files, indexed = db.index_files(storage)
-    assert files == [{"path": "Images/H_slice/HSLice_B_7-27-2026.mesc", "size": 4, "mtime": files[0]["mtime"]}]
+    assert files == [
+        {
+            "path": "Images/H_slice/HSLice_B_7-27-2026.mesc",
+            "size": 4,
+            "mtime": files[0]["mtime"],
+        }
+    ]
     assert indexed["storage"] == storage.label
-    after = sorted((p, p.stat().st_mtime_ns) for p in tmp_path.rglob("*") if p.name != "s.sqlite")
+    after = sorted(
+        (p, p.stat().st_mtime_ns) for p in tmp_path.rglob("*") if p.name != "s.sqlite"
+    )
     assert after == [entry for entry in before if entry[0].name != "s.sqlite"]
     assert SliceDatabase(tmp_path / "s.sqlite").files()[0] == files
 
@@ -110,7 +144,9 @@ def test_update_parses_by_column(tmp_path):
     with pytest.raises(ValueError, match="no patient"):
         db.update("slices", first["id"], "patient_id", "H99.999", ADMIN)
     with pytest.raises(ValueError, match="already taken"):
-        db.update("slices", first["id"], "slice_id", db.rows("slices")[1]["slice_id"], ADMIN)
+        db.update(
+            "slices", first["id"], "slice_id", db.rows("slices")[1]["slice_id"], ADMIN
+        )
     with pytest.raises(ValueError, match="edit it on Patients"):
         db.update("slices", first["id"], "collection_date", "2026-01-01", ADMIN)
 
@@ -151,7 +187,10 @@ def test_add_and_duplicate_take_fresh_ids(tmp_path):
     id_ = db.add("slices", "adrian", patient["patient_id"])
     added = next(s for s in db.rows("slices") if s["id"] == id_)
     assert added["patient_id"] == patient["patient_id"] and added["owner"] == "adrian"
-    assert added["slice_id"] == f"{patient['patient_id']}.S04" and added["file_match"] == patient["collection_date"]
+    assert (
+        added["slice_id"] == f"{patient['patient_id']}.S04"
+        and added["file_match"] == patient["collection_date"]
+    )
     copies = db.duplicate("slices", [id_, id_], "adrian")
     ids = [s["slice_id"] for s in db.rows("slices")]
     assert len(copies) == 2 and len(ids) == len(set(ids))
@@ -169,7 +208,9 @@ def test_reset_and_export(tmp_path):
     db.export("slices", tmp_path / "slices.csv")
     with open(tmp_path / "slices.csv", newline="", encoding="utf-8-sig") as f:
         rows = list(csv.DictReader(f))
-    assert len(rows) == len(seeded) and list(rows[0]) == [name for name, _, _ in COLUMNS["slices"]]
+    assert len(rows) == len(seeded) and list(rows[0]) == [
+        name for name, _, _ in COLUMNS["slices"]
+    ]
     assert rows[0]["notes"] == "ΔF/F in μm"
 
 

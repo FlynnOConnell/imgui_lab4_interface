@@ -8,7 +8,16 @@ from imgui_lab4_interface.viewers import command
 
 LAYOUT = {
     "lab/M231/2026-08-21/movie.tif": 100,
-    "lab/M231/2026-08-21/movie.tif" + SIDECAR_SUFFIX: json.dumps({"recording": "M231_2026-08-21_rec01", "key": {"subject_id": "M231", "session_datetime": "2026-08-21 14:30:00", "experimenter": "loson"}}),
+    "lab/M231/2026-08-21/movie.tif" + SIDECAR_SUFFIX: json.dumps(
+        {
+            "recording": "M231_2026-08-21_rec01",
+            "key": {
+                "subject_id": "M231",
+                "session_datetime": "2026-08-21 14:30:00",
+                "experimenter": "loson",
+            },
+        }
+    ),
     "lab/M231/2026-08-21/run_20260822/config.json": "{}",
     "lab/M231/2026-08-21/run_20260822/results.hdf5": 400,
     "lab/M231/2026-08-21/suite2p/plane0/ops.npy": 10,
@@ -50,7 +59,12 @@ def rows(catalog, query: str) -> list[tuple]:
 
 def test_scan_finds_every_kind(scanned):
     catalog, storage, found = scanned
-    kinds = {path: (kind, detail) for path, kind, detail in rows(catalog, "SELECT path, kind, detail FROM datasets")}
+    kinds = {
+        path: (kind, detail)
+        for path, kind, detail in rows(
+            catalog, "SELECT path, kind, detail FROM datasets"
+        )
+    }
     assert kinds == {
         "/lab/M231/2026-08-21/movie.tif": ("tiff", ""),
         "/lab/M231/2026-08-21/run_20260822": ("masknmf-run", "results.hdf5"),
@@ -86,8 +100,17 @@ def test_describe_summarizes_folders_and_items(scanned):
 
 def test_sidecars_are_indexed(scanned):
     catalog, storage, _ = scanned
-    assert rows(catalog, "SELECT storage, path, subject, session_date, experimenter FROM metadata") == [
-        (storage.label, "/lab/M231/2026-08-21/movie.tif", "M231", "2026-08-21 14:30:00", "loson")
+    assert rows(
+        catalog,
+        "SELECT storage, path, subject, session_date, experimenter FROM metadata",
+    ) == [
+        (
+            storage.label,
+            "/lab/M231/2026-08-21/movie.tif",
+            "M231",
+            "2026-08-21 14:30:00",
+            "loson",
+        )
     ]
 
 
@@ -95,7 +118,10 @@ def test_rescan_replaces_only_its_subtree(scanned, tmp_path):
     catalog, storage, _ = scanned
     (tmp_path / "mount" / "lab" / "M231" / "tiffs" / "b.tif").unlink()
     catalog.scan(storage, "/lab/M231/tiffs")
-    paths = {path for path, in rows(catalog, "SELECT path FROM datasets WHERE kind = 'tiff'")}
+    paths = {
+        path
+        for (path,) in rows(catalog, "SELECT path FROM datasets WHERE kind = 'tiff'")
+    }
     assert "/lab/M231/tiffs/b.tif" not in paths
     assert "/lab/M231/2026-08-21/movie.tif" in paths
     assert rows(catalog, "SELECT path FROM datasets WHERE kind = 'tiff-series'") == []
@@ -103,6 +129,10 @@ def test_rescan_replaces_only_its_subtree(scanned, tmp_path):
 
 def test_command_per_viewer(tmp_path):
     settings = Settings(command_mbo="mbo", command_masknmf="C:/envs/masknmf.exe")
-    assert command(settings, "masknmf-run", tmp_path) == ["C:/envs/masknmf.exe", "view", str(tmp_path)]
+    assert command(settings, "masknmf-run", tmp_path) == [
+        "C:/envs/masknmf.exe",
+        "view",
+        str(tmp_path),
+    ]
     assert command(settings, "voltage-pf", tmp_path) == ["mbo", "curate", str(tmp_path)]
     assert command(settings, "mesc", tmp_path) == ["mbo", str(tmp_path)]

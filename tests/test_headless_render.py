@@ -52,7 +52,11 @@ def test_every_page_renders(tmp_path, monkeypatch):
     (tmp_path / "mount" / "archive" / "x").mkdir(parents=True)
     (tmp_path / "data.tif").write_bytes(b"tif")
     idl.ensure_assets()
-    app = Lab4App(Settings(mount_root=str(tmp_path / "mount"), destinations=[["/archive/x", "test"]]))
+    app = Lab4App(
+        Settings(
+            mount_root=str(tmp_path / "mount"), destinations=[["/archive/x", "test"]]
+        )
+    )
     app.sources = [str(tmp_path / "data.tif")]
     app.recording.subject_id = "M231"
     driver = Driver(app)
@@ -79,17 +83,62 @@ def test_every_page_renders(tmp_path, monkeypatch):
 
 def lab4_schema() -> Schema:
     """The Lab4 tables as lab4.tables declares them, without a database."""
-    keys = {"experimenter", "collection_name", "subject_id", "session_datetime", "device_name"}
+    keys = {
+        "experimenter",
+        "collection_name",
+        "subject_id",
+        "session_datetime",
+        "device_name",
+    }
     shapes = {
         "expt_group": [("experimenter", "varchar"), ("collection_name", "varchar")],
-        "subject": [("subject_id", "varchar"), ("genotype", "varchar"), ("dob", "date"), ("sex", "varchar")],
-        "session": [("experimenter", "varchar"), ("collection_name", "varchar"), ("subject_id", "varchar"), ("session_datetime", "timestamp"), ("session_notes", "varchar")],
-        "recording": [*[(k, "varchar") for k in sorted(keys)], ("data_path", "varchar"), ("ui_label", "varchar"), ("weight_g", "numeric")],
-        "injection": [("subject_id", "varchar"), ("indicator", "varchar"), ("injection_date", "date"), ("injection_notes", "varchar")],
+        "subject": [
+            ("subject_id", "varchar"),
+            ("genotype", "varchar"),
+            ("dob", "date"),
+            ("sex", "varchar"),
+        ],
+        "session": [
+            ("experimenter", "varchar"),
+            ("collection_name", "varchar"),
+            ("subject_id", "varchar"),
+            ("session_datetime", "timestamp"),
+            ("session_notes", "varchar"),
+        ],
+        "recording": [
+            *[(k, "varchar") for k in sorted(keys)],
+            ("data_path", "varchar"),
+            ("ui_label", "varchar"),
+            ("weight_g", "numeric"),
+        ],
+        "injection": [
+            ("subject_id", "varchar"),
+            ("indicator", "varchar"),
+            ("injection_date", "date"),
+            ("injection_notes", "varchar"),
+        ],
     }
-    key_of = {"expt_group": {"experimenter", "collection_name"}, "subject": {"subject_id"}, "session": keys - {"device_name"}, "recording": keys, "injection": {"subject_id", "indicator"}}
-    tables = {table: [Column(name, kind, name not in key_of[table], False, name in key_of[table]) for name, kind in columns] for table, columns in shapes.items()}
-    return Schema(user="loson", tables=tables, choices={"genotype": ["WT"], "indicator": ["AAV9-syn-jGCaMP8s"]}, groups=[("Eunji Kong", "place cells")], subjects=["M231"])
+    key_of = {
+        "expt_group": {"experimenter", "collection_name"},
+        "subject": {"subject_id"},
+        "session": keys - {"device_name"},
+        "recording": keys,
+        "injection": {"subject_id", "indicator"},
+    }
+    tables = {
+        table: [
+            Column(name, kind, name not in key_of[table], False, name in key_of[table])
+            for name, kind in columns
+        ]
+        for table, columns in shapes.items()
+    }
+    return Schema(
+        user="loson",
+        tables=tables,
+        choices={"genotype": ["WT"], "indicator": ["AAV9-syn-jGCaMP8s"]},
+        groups=[("Eunji Kong", "place cells")],
+        subjects=["M231"],
+    )
 
 
 def lab4_app(tmp: Path) -> Lab4App:
@@ -97,15 +146,37 @@ def lab4_app(tmp: Path) -> Lab4App:
     (tmp / "mount" / "data2").mkdir(parents=True)
     (tmp / "mount" / "data2" / "rec.h5").write_bytes(b"h5")
     (tmp / "mount" / "data2" / "rec.h5.lab4.json").write_text('{"extra": {"rig": "B"}}')
-    app = Lab4App(Settings(mount_root=str(tmp / "mount"), destinations=[["/biohpc/data2", "test"]]))
+    app = Lab4App(
+        Settings(
+            mount_root=str(tmp / "mount"), destinations=[["/biohpc/data2", "test"]]
+        )
+    )
     app.user, app.schema = "loson", lab4_schema()
-    key = {"experimenter": "Eunji Kong", "collection_name": "place cells", "subject_id": "M231", "session_datetime": datetime(2026, 8, 21, 14, 30)}
-    recording = {**key, "device_name": "Bruker 1 Imaging", "data_path": "/biohpc/data2/rec.h5", "ui_label": None, "weight_g": Decimal("24.50")}
+    key = {
+        "experimenter": "Eunji Kong",
+        "collection_name": "place cells",
+        "subject_id": "M231",
+        "session_datetime": datetime(2026, 8, 21, 14, 30),
+    }
+    recording = {
+        **key,
+        "device_name": "Bruker 1 Imaging",
+        "data_path": "/biohpc/data2/rec.h5",
+        "ui_label": None,
+        "weight_g": Decimal("24.50"),
+    }
     app.lab4 = {
         "subject": [{"subject_id": "M231", "genotype": "WT", "dob": None, "sex": "U"}],
         "session": [{**key, "session_notes": ""}],
         "recording": [recording],
-        "injection": [{"subject_id": "M231", "indicator": "AAV9-syn-jGCaMP8s", "injection_date": None, "injection_notes": ""}],
+        "injection": [
+            {
+                "subject_id": "M231",
+                "indicator": "AAV9-syn-jGCaMP8s",
+                "injection_date": None,
+                "injection_notes": "",
+            }
+        ],
     }
     app.registered = {recording["data_path"]: recording}
     app.connect()
@@ -150,7 +221,9 @@ def test_lab4_pages_render_a_picked_recording(tmp_path, monkeypatch):
     assert app.sidecar_lab4 == {"extra": {"rig": "B"}} and app.sidecar.startswith("{")
     app.page = "recordings"
     assert app.problems() == []
-    assert [(table, values) for table, _, values in app.changes_lab4()] == [("recording", {"ui_label": "day 1"})]
+    assert [(table, values) for table, _, values in app.changes_lab4()] == [
+        ("recording", {"ui_label": "day 1"})
+    ]
     assert app.sidecar_rewrite()[0] == "/biohpc/data2/rec.h5.lab4.json"
     assert json.loads(app.sidecar_rewrite()[1])["extra"] == {"rig": "B"}
 
@@ -159,7 +232,11 @@ def test_sign_in_without_credentials_stays_signed_out(tmp_path, monkeypatch):
     monkeypatch.setenv("IMGUI_LAB4_HOME", str(tmp_path))
     app = Lab4App(Settings())
     app.sign_in()
-    assert app.user == "" and "cannot read" in app.error_login and "sign_in" not in app.futures
+    assert (
+        app.user == ""
+        and "cannot read" in app.error_login
+        and "sign_in" not in app.futures
+    )
 
 
 def test_one_detected_mount_fills_an_unset_root(tmp_path, monkeypatch):

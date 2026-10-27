@@ -148,16 +148,31 @@ class Schema:
     def problems(self, rec: Recording) -> list[str]:
         """What the database would reject in rec."""
         found = []
-        for column, value in (("experimenter", rec.experimenter), ("device_name", rec.device_name)):
-            if column in self.choices and value.strip() and value.strip() not in self.choices[column]:
-                found.append(f"{column.replace('_', ' ')} {value.strip()!r} is not in Lab4")
+        for column, value in (
+            ("experimenter", rec.experimenter),
+            ("device_name", rec.device_name),
+        ):
+            if (
+                column in self.choices
+                and value.strip()
+                and value.strip() not in self.choices[column]
+            ):
+                found.append(
+                    f"{column.replace('_', ' ')} {value.strip()!r} is not in Lab4"
+                )
         if rec.subject_id.strip() and rec.subject_id.strip() not in self.subjects:
             for column in self.subject_fields():
                 value = rec.subject_fields.get(column.name, "").strip()
                 if column.required and not value:
                     found.append(f"new subject needs {column.name.replace('_', ' ')}")
-                elif value and column.name in self.choices and value not in self.choices[column.name]:
-                    found.append(f"{column.name.replace('_', ' ')} {value!r} is not in Lab4")
+                elif (
+                    value
+                    and column.name in self.choices
+                    and value not in self.choices[column.name]
+                ):
+                    found.append(
+                        f"{column.name.replace('_', ' ')} {value!r} is not in Lab4"
+                    )
         return found
 
 
@@ -201,30 +216,67 @@ class Lab4Database:
         with self.connect() as conn:
             user = conn.execute("SELECT current_user").fetchone()[0]
             keys, lookups = set(), {}
-            for kind, table, column, referenced in conn.execute(QUERY_KEYS, (name, list(TABLES))):
+            for kind, table, column, referenced in conn.execute(
+                QUERY_KEYS, (name, list(TABLES))
+            ):
                 if kind == "p":
                     keys.add((table, column))
                 elif referenced.startswith("#"):
                     lookups[column] = referenced
             tables = {}
-            for table, column, kind, nullable, has_default in conn.execute(QUERY_COLUMNS, (name, list(TABLES))):
-                tables.setdefault(table, []).append(Column(column, kind, nullable, has_default, (table, column) in keys))
+            for table, column, kind, nullable, has_default in conn.execute(
+                QUERY_COLUMNS, (name, list(TABLES))
+            ):
+                tables.setdefault(table, []).append(
+                    Column(column, kind, nullable, has_default, (table, column) in keys)
+                )
             choices = {}
             for column, lookup in lookups.items():
-                query = sql.SQL("SELECT DISTINCT {} FROM {} ORDER BY 1").format(sql.Identifier(column), self.table(lookup))
+                query = sql.SQL("SELECT DISTINCT {} FROM {} ORDER BY 1").format(
+                    sql.Identifier(column), self.table(lookup)
+                )
                 choices[column] = [row[0] for row in conn.execute(query)]
-            groups = conn.execute(sql.SQL("SELECT experimenter, collection_name FROM {}").format(self.table("expt_group"))).fetchall()
-            subjects = [row[0] for row in conn.execute(sql.SQL("SELECT subject_id FROM {} ORDER BY 1").format(self.table("subject")))]
-        return Schema(user=user, tables=tables, choices=choices, groups=[tuple(g) for g in groups], subjects=subjects)
+            groups = conn.execute(
+                sql.SQL("SELECT experimenter, collection_name FROM {}").format(
+                    self.table("expt_group")
+                )
+            ).fetchall()
+            subjects = [
+                row[0]
+                for row in conn.execute(
+                    sql.SQL("SELECT subject_id FROM {} ORDER BY 1").format(
+                        self.table("subject")
+                    )
+                )
+            ]
+        return Schema(
+            user=user,
+            tables=tables,
+            choices=choices,
+            groups=[tuple(g) for g in groups],
+            subjects=subjects,
+        )
 
-    def insert(self, conn: psycopg.Connection, table: str, values: dict, columns: dict, ignore_existing: bool) -> bool:
+    def insert(
+        self,
+        conn: psycopg.Connection,
+        table: str,
+        values: dict,
+        columns: dict,
+        ignore_existing: bool,
+    ) -> bool:
         """Insert the values table has columns for; returns whether a row was added."""
         values = {k: v for k, v in values.items() if k in columns}
         if ignore_existing:
             # NOT NULL fires before ON CONFLICT, so look for the key first
             key = {k: v for k, v in values.items() if columns[k].key}
-            where = sql.SQL(" AND ").join(sql.SQL("{} = %s").format(sql.Identifier(k)) for k in key)
-            if conn.execute(sql.SQL("SELECT 1 FROM {} WHERE {}").format(self.table(table), where), list(key.values())).fetchone():
+            where = sql.SQL(" AND ").join(
+                sql.SQL("{} = %s").format(sql.Identifier(k)) for k in key
+            )
+            if conn.execute(
+                sql.SQL("SELECT 1 FROM {} WHERE {}").format(self.table(table), where),
+                list(key.values()),
+            ).fetchone():
                 return False
         query = sql.SQL("INSERT INTO {} ({}) VALUES ({}){}").format(
             self.table(table),
@@ -240,25 +292,62 @@ class Lab4Database:
         Returns which rows were added; raises ValueError when already registered.
         """
         key = rec.key()
-        session_key = {k: key[k] for k in ("experimenter", "collection_name", "subject_id", "session_datetime")}
-        subject = {"subject_id": key["subject_id"], **{k: v.strip() for k, v in rec.subject_fields.items() if v.strip()}}
-        recording = {**key, "data_path": canonical(data_path), "ui_label": rec.ui_label.strip() or None, "weight_g": rec.weight_g.strip() or None}
+        session_key = {
+            k: key[k]
+            for k in (
+                "experimenter",
+                "collection_name",
+                "subject_id",
+                "session_datetime",
+            )
+        }
+        subject = {
+            "subject_id": key["subject_id"],
+            **{k: v.strip() for k, v in rec.subject_fields.items() if v.strip()},
+        }
+        recording = {
+            **key,
+            "data_path": canonical(data_path),
+            "ui_label": rec.ui_label.strip() or None,
+            "weight_g": rec.weight_g.strip() or None,
+        }
         with self.connect() as conn, conn.transaction():
             added = {
-                "expt_group": self.insert(conn, "expt_group", {"experimenter": key["experimenter"], "collection_name": key["collection_name"]}, schema.columns("expt_group"), True),
-                "subject": self.insert(conn, "subject", subject, schema.columns("subject"), True),
-                "session": self.insert(conn, "session", {**session_key, "session_notes": rec.notes.strip()}, schema.columns("session"), True),
+                "expt_group": self.insert(
+                    conn,
+                    "expt_group",
+                    {
+                        "experimenter": key["experimenter"],
+                        "collection_name": key["collection_name"],
+                    },
+                    schema.columns("expt_group"),
+                    True,
+                ),
+                "subject": self.insert(
+                    conn, "subject", subject, schema.columns("subject"), True
+                ),
+                "session": self.insert(
+                    conn,
+                    "session",
+                    {**session_key, "session_notes": rec.notes.strip()},
+                    schema.columns("session"),
+                    True,
+                ),
             }
             try:
                 with conn.transaction():
-                    added["recording"] = self.insert(conn, "recording", recording, schema.columns("recording"), False)
+                    added["recording"] = self.insert(
+                        conn, "recording", recording, schema.columns("recording"), False
+                    )
             except psycopg.errors.UniqueViolation as e:
                 raise ValueError(f"{rec.label()} is already registered in Lab4") from e
         return added
 
     def recordings(self, subject_id: str) -> list[dict]:
         """The subject's recordings, newest session first."""
-        query = sql.SQL("SELECT * FROM {} WHERE subject_id = %s ORDER BY session_datetime DESC").format(self.table("recording"))
+        query = sql.SQL(
+            "SELECT * FROM {} WHERE subject_id = %s ORDER BY session_datetime DESC"
+        ).format(self.table("recording"))
         with self.connect() as conn, conn.cursor(row_factory=dict_row) as cur:
             return cur.execute(query, (subject_id,)).fetchall()
 
@@ -271,8 +360,18 @@ class Lab4Database:
             with conn.cursor(row_factory=dict_row) as cur:
                 for table in TABLES:
                     if table in schema.tables:
-                        order = sql.SQL(" ORDER BY session_datetime DESC, subject_id, device_name") if table == "recording" else sql.SQL("")
-                        found[table] = cur.execute(sql.SQL("SELECT * FROM {}{}").format(self.table(table), order)).fetchall()
+                        order = (
+                            sql.SQL(
+                                " ORDER BY session_datetime DESC, subject_id, device_name"
+                            )
+                            if table == "recording"
+                            else sql.SQL("")
+                        )
+                        found[table] = cur.execute(
+                            sql.SQL("SELECT * FROM {}{}").format(
+                                self.table(table), order
+                            )
+                        ).fetchall()
         return found
 
     def update(self, schema: Schema, edits: list[tuple[str, dict, dict]]) -> None:
@@ -287,14 +386,22 @@ class Lab4Database:
                 if set(key) != {c.name for c in columns.values() if c.key}:
                     raise ValueError(f"{sorted(key)} is not the key of {table}")
                 if any(name not in columns or columns[name].key for name in values):
-                    raise ValueError(f"only {', '.join(c.name for c in schema.details(table))} can change in {table}")
-                values = {name: stored(columns[name], text) for name, text in values.items()}
+                    raise ValueError(
+                        f"only {', '.join(c.name for c in schema.details(table))} can change in {table}"
+                    )
+                values = {
+                    name: stored(columns[name], text) for name, text in values.items()
+                }
                 if "data_path" in values:
                     values["data_path"] = canonical(values["data_path"])
                 query = sql.SQL("UPDATE {} SET {} WHERE {}").format(
                     self.table(table),
-                    sql.SQL(", ").join(sql.SQL("{} = %s").format(sql.Identifier(k)) for k in values),
-                    sql.SQL(" AND ").join(sql.SQL("{} = %s").format(sql.Identifier(k)) for k in key),
+                    sql.SQL(", ").join(
+                        sql.SQL("{} = %s").format(sql.Identifier(k)) for k in values
+                    ),
+                    sql.SQL(" AND ").join(
+                        sql.SQL("{} = %s").format(sql.Identifier(k)) for k in key
+                    ),
                 )
                 if conn.execute(query, [*values.values(), *key.values()]).rowcount != 1:
                     raise ValueError(f"no {table.replace('_', ' ')} {key} in Lab4")
@@ -307,4 +414,6 @@ class Lab4Database:
                 with conn.transaction():
                     self.insert(conn, table, row, schema.columns(table), False)
             except psycopg.errors.UniqueViolation as e:
-                raise ValueError(f"that {table.replace('_', ' ')} is already in Lab4") from e
+                raise ValueError(
+                    f"that {table.replace('_', ' ')} is already in Lab4"
+                ) from e
