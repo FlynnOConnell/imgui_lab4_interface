@@ -15,7 +15,10 @@
   `patient_id` and `slice_id`; renames cascade and parents with children cannot be deleted. `files` is an index of
   everything under `ROOT`. `COLUMNS` types every editable column. Rows have an `owner`, and `can_edit` (owner or
   `ADMIN`) is checked on every update and delete. `match_files` finds a slice's files from its `file_match`. A file
-  from another `VERSION_SCHEMA` is renamed aside, not dropped.
+  from another `VERSION_SCHEMA` is renamed aside, not dropped. `read_data` fills `images` and `runs` from raw data.
+- `rawdata.py`: `mesc_images` reads each `.mesc` unit's time, camera or 2P, objective, size and a thumbnail of its
+  middle frame; `nwb_runs` splits a MIES `.nwb` into runs and measures each sweep's resting Vm, input resistance from
+  its first negative step, and spikes.
 - `viewers.py`: the command each dataset kind opens with, and the detached launch.
 - `lab4.py`: `Recording`, the Lab4 key, its details, a new subject's fields, and the sidecar; `from_sidecar` and
   `from_lab4` fill one back from a sidecar or Lab4 rows.

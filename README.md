@@ -85,7 +85,10 @@ uv run lab4
    type or press F2; Enter, Tab and the arrows move on, Escape cancels, Delete empties a cell, and Ctrl+Delete
    deletes the picked rows. Double-click a file to open it; over
    ssh it is first copied to `~/.imgui_lab4_interface/cache`, after asking. Rows belong to whoever added them;
-   `shobhana` is the admin. *acting as* picks the user.
+   `shobhana` is the admin. *acting as* picks the user. *Read images and ephys* reads the `.mesc` files the slices
+   match and each MIES `.nwb` (copied to the cache first over ssh, after asking); a picked slice then shows its scope
+   images, double-click one to open that unit in mbo, and the current-clamp runs recorded on its day, with resting
+   Vm, input resistance and spike count.
 
 Opening a dataset needs the share mounted (ssh can only list) and the viewers set in Settings.
 
@@ -105,7 +108,7 @@ Under `~/.imgui_lab4_interface/` (or `IMGUI_LAB4_HOME`):
 | `recent.json` | recent sources, shown in the rail |
 | `window.ini` | window layout |
 | `catalog.sqlite` | the catalog: `datasets`, `folders`, `metadata`, `units`, `runs`, `results`, `scans` |
-| `slices.sqlite` | the slice tables: `patients`, `slices`, `assays`, and the `files` index |
+| `slices.sqlite` | the slice tables: `patients`, `slices`, `assays`, the `files` index, and the `images` and `runs` read from raw data |
 | `cache/` | files copied from BioHPC to open |
 | `logs/` | viewer output |
 | `jobs.json` | submitted processing jobs |
@@ -140,6 +143,7 @@ Nothing is deleted, moved or renamed on BioHPC. Every action that writes data or
 | Lab4 recordings: Save to Lab4 | the recording's, session's and subject's columns outside the key, then, if ticked, the sidecar beside its data | Save to Lab4? |
 | Lab4 recordings: Add injection | an Injection row | Add to Lab4? |
 | Human slices: open a file over ssh | a copy in `cache/` | Copy to this machine? |
+| Human slices: Read images and ephys over ssh | copies in `cache/` | Copy to this machine? |
 | Human slices: Export | a csv | the system save dialog |
 | Human slices: Delete, Reset rows | rows in `slices.sqlite` | Delete rows?, Reset rows? |
 

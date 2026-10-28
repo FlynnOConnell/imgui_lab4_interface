@@ -11,12 +11,13 @@ import time
 import webbrowser
 from collections import Counter
 from concurrent.futures import Future, ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
 import imgui_data_loader as idl
-from imgui_bundle import hello_imgui, imgui, imgui_ctx, immapp
+import numpy as np
+from imgui_bundle import hello_imgui, imgui, imgui_ctx, immapp, immvision
 from imgui_bundle import icons_fontawesome_6 as fa
 from imgui_bundle import portable_file_dialogs as pfd
 
@@ -43,6 +44,7 @@ from imgui_lab4_interface.slices import (
     PEOPLE,
     ROOT,
     SliceDatabase,
+    cached,
     can_edit,
     file_dates,
     locked,
@@ -119,6 +121,7 @@ NAMES_LONG = (
     "scan_machines",
     "files_index",
     "download",
+    "read_data",
 )
 COLORS_RUN = {"done": OK, "completed": OK, "failed": ERROR, "running": ACCENT}
 NAMES_REACH = {"local": "This computer", "mounted": "Mounted here", "ssh": "SSH"}
@@ -184,6 +187,8 @@ LINKS = (
         "sign in with GitLab and download your credentials",
     ),
 )
+# ephys runs before 6 am belong to the evening before
+HOURS_NIGHT = 6
 # slice table colors for outcome and incubator
 COLORS_SLICE = {
     "ok": OK,
@@ -519,6 +524,9 @@ class Lab4App:
         # file index under ROOT, when it was taken, and the last indexing error
         self.files_index, self.indexed = self.slices.files()
         self.error_index = ""
+        # images and ephys runs read from the raw data, and the running read's files done and total
+        self.load_raw()
+        self.progress_read: dict = {}
         # the storage label the running index was started for
         self.index_for = ""
         # bumped when slice rows or the file index change, invalidating cache_files: (key, files_of's result)
@@ -832,6 +840,71 @@ class Lab4App:
         self.dest_checked = ""
         self.index_files()
 
+    def load_raw(self) -> None:
+        """Reload the images, each with an RGB thumbnail, grey from the camera and green from 2P, and the ephys runs."""
+        self.images = self.slices.images()
+        for image in self.images:
+            gray = image["thumb"]
+            image["rgb"] = np.dstack(
+                [gray] * 3
+                if image["kind"] == "camera"
+                else [gray // 6, gray, gray // 6]
+            )
+        self.runs = self.slices.runs()
+
+    def read_data(self) -> None:
+        """
+        Read the .mesc files the slices match and every .nwb, one copy each, into the images and runs tables. Files off
+        the mount are copied to the cache first, after asking.
+        """
+        claimed = {
+            f["path"]
+            for s in self.rows_slices["slices"]
+            for f in match_files(self.files_index, s["file_match"] or "")
+        }
+        unique: dict[tuple[str, int], dict] = {}
+        for f in self.files_index:
+            if f["path"].lower().endswith(".nwb") or (
+                f["path"] in claimed and f["path"].lower().endswith(".mesc")
+            ):
+                unique.setdefault((posixpath.basename(f["path"]), f["size"]), f)
+        files = list(unique.values())
+        try:
+            off_mount = [
+                f
+                for f in files
+                if self.storage.local_path(f"{ROOT}/{f['path']}") is None
+            ]
+        except OSError as e:
+            self.message, self.failed = str(e), True
+            return
+        to_copy = []
+        for f in off_mount:
+            copy = cached(f"{ROOT}/{f['path']}")
+            if not (copy.is_file() and copy.stat().st_size == f["size"]):
+                to_copy.append(f)
+        if not to_copy:
+            self.start_read(files=files)
+            return
+        lines = [
+            f"{len(to_copy)} file(s), {human_bytes(sum(f['size'] for f in to_copy))}, from {self.storage.label}",
+            f"to {data_dir() / 'cache'}",
+            f"then read {len(files)} .mesc and .nwb file(s) into the slice table. Nothing on BioHPC changes.",
+        ]
+        self.confirm = {
+            "title": "Copy to this machine?",
+            "lines": lines,
+            "button": "Copy and read",
+            "run": self.start_read,
+            "args": (files,),
+        }
+
+    def start_read(self, files: list[dict]) -> None:
+        self.progress_read = {"done": 0, "total": len(files), "name": ""}
+        self.submit(
+            "read_data", self.slices.read_data, self.storage, files, self.progress_read
+        )
+
     def index_files(self) -> None:
         """Index the files under ROOT, unless an index is already running."""
         if "files_index" not in self.futures:
@@ -922,13 +995,15 @@ class Lab4App:
             return
         self.open_local(local=local, kind=kind)
 
-    def open_local(self, local: Path, kind: Optional[str]) -> None:
-        """Open a local file in its viewer, or its default app when it has no kind."""
+    def open_local(
+        self, local: Path, kind: Optional[str], unit: Optional[str] = None
+    ) -> None:
+        """Open a local file in its viewer, at unit for a .mesc, or its default app when it has no kind."""
         self.failed = True
         try:
             if kind is not None:
-                log = viewers.launch(viewers.command(self.settings, kind, local))
-                self.message = f"opened {local.name} in {KINDS[kind][0]} (log: {log})"
+                log = viewers.launch(viewers.command(self.settings, kind, local, unit))
+                self.message = f"opened {local.name}{' ' + unit if unit else ''} in {KINDS[kind][0]} (log: {log})"
             elif sys.platform == "win32":
                 os.startfile(local)
                 self.message = f"opened {local.name} in its default app"
@@ -942,8 +1017,8 @@ class Lab4App:
             return
         self.failed = False
 
-    def open_file(self, path: str, size: int) -> None:
-        """Open a file under ROOT: in place when mounted, else from a cached copy, after asking."""
+    def open_file(self, path: str, size: int, unit: Optional[str] = None) -> None:
+        """Open a file under ROOT, at unit for a .mesc: in place when mounted, else from a cached copy, after asking."""
         remote = f"{ROOT}/{path}"
         name = posixpath.basename(remote)
         kind = classify_file(name)
@@ -959,35 +1034,41 @@ class Lab4App:
             )
             return
         if local is not None:
-            self.open_local(local=local, kind=kind)
+            self.open_local(local=local, kind=kind, unit=unit)
             return
-        cached = data_dir() / "cache" / remote.lstrip("/")
-        if cached.is_file() and cached.stat().st_size == size:
-            self.open_local(local=cached, kind=kind)
+        copy = cached(remote)
+        if copy.is_file() and copy.stat().st_size == size:
+            self.open_local(local=copy, kind=kind, unit=unit)
             return
         lines = [
             f"{name}, {human_bytes(size)}",
             f"from {self.storage.label}: {remote}",
-            f"to {cached}",
+            f"to {copy}",
             f"then open it in {KINDS[kind][0] if kind else 'its default app'}. Nothing on BioHPC changes.",
         ]
-        if cached.exists():
+        if copy.exists():
             lines.append("The cached copy is replaced.")
         self.confirm = {
             "title": "Copy to this machine?",
             "lines": lines,
             "button": "Copy and open",
             "run": self.start_fetch,
-            "args": (remote, cached, kind, size),
+            "args": (remote, copy, kind, size, unit),
         }
 
     def start_fetch(
-        self, remote: str, cached: Path, kind: Optional[str], size: int
+        self,
+        remote: str,
+        cached: Path,
+        kind: Optional[str],
+        size: int,
+        unit: Optional[str] = None,
     ) -> None:
         self.fetch = {
             "remote": remote,
             "local": cached,
             "kind": kind,
+            "unit": unit,
             "done": 0,
             "total": size,
         }
@@ -1509,9 +1590,23 @@ class Lab4App:
                         f"cannot read the sources: {error}",
                         True,
                     )
+            elif name == "read_data":
+                if error is None:
+                    n_images, n_runs = future.result()
+                    self.load_raw()
+                    self.message = f"read {n_images} images and {n_runs} ephys runs"
+                else:
+                    self.message = (
+                        f"reading {self.progress_read.get('name', '')} failed: {error}"
+                    )
+                self.failed = error is not None
             elif name == "download":
                 if error is None:
-                    self.open_local(local=self.fetch["local"], kind=self.fetch["kind"])
+                    self.open_local(
+                        local=self.fetch["local"],
+                        kind=self.fetch["kind"],
+                        unit=self.fetch["unit"],
+                    )
                 else:
                     self.message, self.failed = f"copy failed: {error}", True
                 self.fetch = None
@@ -4064,6 +4159,7 @@ class Lab4App:
                     draw_wrapped(slice_["notes"], DIM)
                 if slice_["source"]:
                     draw_wrapped(f"from {slice_['source']}", DIM)
+                self.draw_raw(slice_=slice_, files=files)
         imgui.table_next_column()
         with imgui_ctx.begin_child("##slice_files"):
             indexing = "files_index" in self.futures
@@ -4080,6 +4176,26 @@ class Lab4App:
             if imgui.small_button(f"{fa.ICON_FA_ARROWS_ROTATE}##index"):
                 self.index_files()
             imgui.end_disabled()
+            text_read = f"{fa.ICON_FA_IMAGE}  Read images and ephys"
+            same_line_or_wrap(width_button(text_read))
+            reading = "read_data" in self.futures
+            imgui.begin_disabled(
+                reading or indexing or self.indexed is None or self.fetch is not None
+            )
+            if imgui.small_button(text_read):
+                self.read_data()
+            imgui.end_disabled()
+            if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
+                idl.wrapped_tooltip(
+                    "read the images in the .mesc files the slices match, and the ephys runs in each .nwb, so a picked slice shows them"
+                )
+            if reading:
+                progress = self.progress_read
+                imgui.progress_bar(
+                    progress["done"] / max(progress["total"], 1),
+                    imgui.ImVec2(-1, 0),
+                    f"reading {progress['name']}",
+                )
             if self.error_index:
                 draw_wrapped(
                     f"indexing failed on {self.storage.label}: {self.error_index}", WARN
@@ -4136,6 +4252,76 @@ class Lab4App:
                 )
             imgui.end_disabled()
         imgui.end_table()
+
+    def draw_raw(self, slice_: dict, files: list[dict]) -> None:
+        """
+        The images in the slice's .mesc files, double-click to open one in mbo, and the ephys runs recorded on its day
+        (the patient's collection date plus its day).
+        """
+        em = imgui.get_font_size()
+        paths = {(posixpath.basename(f["path"]), f["size"]): f["path"] for f in files}
+        images = [
+            image for image in self.images if (image["name"], image["size"]) in paths
+        ]
+        if images:
+            imgui.spacing()
+            draw_wrapped(f"{fa.ICON_FA_IMAGE}  {len(images)} scope images", DIM)
+            width = 8 * em
+            for n, image in enumerate(images):
+                if n:
+                    same_line_or_wrap(width)
+                immvision.image_display(
+                    f"##thumb_{image['name']}_{image['unit']}",
+                    image["rgb"],
+                    (int(width), 0),
+                )
+                if imgui.is_item_hovered():
+                    comment = f"\n{image['comment']}" if image["comment"] else ""
+                    idl.wrapped_tooltip(
+                        f"{image['taken']} · {image['kind']} {image['method']}, {image['objective'] or 'objective not set'}\n"
+                        f"{image['width']} x {image['height']} px, {image['frames']} frame(s){comment}\n{image['name']} {image['unit']}\n"
+                        "double-click to open this image in mbo"
+                    )
+                    if imgui.is_mouse_double_clicked(imgui.MouseButton_.left):
+                        self.open_file(
+                            path=paths[(image["name"], image["size"])],
+                            size=image["size"],
+                            unit=image["unit"],
+                        )
+        if slice_["day"] is None or not slice_["collection_date"]:
+            return
+        day = (
+            datetime.fromisoformat(slice_["collection_date"])
+            + timedelta(days=slice_["day"] - 1)
+        ).date()
+        runs = [
+            r
+            for r in self.runs
+            if r["started"]
+            and (
+                datetime.fromisoformat(r["started"]) - timedelta(hours=HOURS_NIGHT)
+            ).date()
+            == day
+        ]
+        if runs:
+            imgui.spacing()
+            draw_wrapped(
+                f"{fa.ICON_FA_BOLT}  {len(runs)} ephys runs recorded on {day}", DIM
+            )
+            for run in runs:
+                rin = (
+                    f", Rin {run['rin_mohm']:.0f} MOhm"
+                    if run["rin_mohm"] is not None
+                    else ""
+                )
+                draw_wrapped(
+                    f"{run['started'][11:16]}  {run['stimset']} x {run['sweeps']}: Vm {run['vm_mv']:.0f} mV{rin}, up to {run['spikes']} spikes",
+                    CODE,
+                )
+                if imgui.is_item_hovered():
+                    idl.wrapped_tooltip(
+                        f"sweeps {run['sweep']} to {run['sweep'] + run['sweeps'] - 1} of {run['name']}, matched by date, not by slice; Vm and Rin are medians over the sweeps, as recorded"
+                    )
 
     def draw_connection(self) -> None:
         """Backend choice and its settings."""
@@ -4412,6 +4598,7 @@ class Lab4App:
 def run() -> None:
     """Open the window and block until it is closed."""
     idl.ensure_assets()
+    immvision.use_rgb_color_order()
     app = Lab4App()
     params = hello_imgui.RunnerParams()
     params.app_window_params.window_title = TITLE_WINDOW

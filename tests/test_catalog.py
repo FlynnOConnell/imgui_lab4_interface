@@ -136,3 +136,9 @@ def test_command_per_viewer(tmp_path):
     ]
     assert command(settings, "voltage-pf", tmp_path) == ["mbo", "curate", str(tmp_path)]
     assert command(settings, "mesc", tmp_path) == ["mbo", str(tmp_path)]
+    assert command(settings, "mesc", tmp_path, "MSession_0/MUnit_3") == [
+        "mbo",
+        str(tmp_path),
+        "--unit",
+        "MSession_0/MUnit_3",
+    ]

@@ -95,6 +95,34 @@ def test_opening_a_file_off_the_mount_says_why(app, tmp_path):
     assert app.failed and "outside /biohpc/data2" in app.message and app.confirm is None
 
 
+def test_an_image_opens_its_unit_in_mbo_on_the_mount_or_after_copying(
+    app, tmp_path, monkeypatch
+):
+    launched = []
+    monkeypatch.setattr(
+        app_module.viewers,
+        "launch",
+        lambda argv: launched.append(argv) or tmp_path / "log",
+    )
+    mesc = tmp_path / "mount" / ROOT.removeprefix("/biohpc/") / "a.mesc"
+    mesc.write_bytes(b"mesc")
+    app.open_file(path="a.mesc", size=4, unit="MSession_0/MUnit_3")
+    assert (
+        launched == [["mbo", str(mesc), "--unit", "MSession_0/MUnit_3"]]
+        and "MUnit_3 in mbo" in app.message
+    )
+    monkeypatch.setattr(app.storage, "local_path", lambda path: None)
+    app.open_file(path="a.mesc", size=4, unit="MSession_0/MUnit_5")
+    app.confirm["run"](*app.confirm["args"])
+    settle(app)
+    assert launched[-1] == [
+        "mbo",
+        str(tmp_path / "home" / "cache" / ROOT.lstrip("/") / "a.mesc"),
+        "--unit",
+        "MSession_0/MUnit_5",
+    ]
+
+
 def test_files_of_a_row_are_matched_once_per_change(app, monkeypatch):
     calls = []
     match = app_module.match_files
@@ -124,6 +152,37 @@ def test_one_index_at_a_time_and_again_for_new_storage(app, tmp_path, monkeypatc
     index.release.set()
     settle(app)
     assert index.started == [first, app.storage.label]
+
+
+def test_reading_takes_one_copy_of_each_mesc_a_slice_matches_and_every_nwb(
+    app, monkeypatch
+):
+    read = []
+    monkeypatch.setattr(
+        app.slices,
+        "read_data",
+        lambda storage, files, progress: read.append([f["path"] for f in files])
+        or (0, 0),
+    )
+    app.files_index = [
+        {"path": "Images/H_slice/HSLice_B_7-27-2026.mesc", "size": 5, "mtime": 0.0},
+        {
+            "path": "Images/Shobhana_Camera/H_slice/HSLice_B_7-27-2026.mesc",
+            "size": 5,
+            "mtime": 0.0,
+        },
+        {"path": "Images/Shobhana_Camera/Ogbfill_7-14.mesc", "size": 5, "mtime": 0.0},
+        {"path": "Ephys/mRNA_9-18-2026_Dev1-compressed.nwb", "size": 5, "mtime": 0.0},
+    ]
+    app.read_data()
+    settle(app)
+    assert read == [
+        [
+            "Images/H_slice/HSLice_B_7-27-2026.mesc",
+            "Ephys/mRNA_9-18-2026_Dev1-compressed.nwb",
+        ]
+    ]
+    assert app.message == "read 0 images and 0 ephys runs" and not app.failed
 
 
 def test_double_clicking_a_cell_edits_it_or_says_why_not(app):

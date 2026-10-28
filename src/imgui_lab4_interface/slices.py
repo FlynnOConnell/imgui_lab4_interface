@@ -2,11 +2,13 @@
 The human slice table: patients, slices and assays in SQLite.
 
 Data stays where Shobhana keeps it on BioHPC. Each slice finds its files with a match pattern over an index of that
-folder, so nothing is moved or renamed. Rows belong to whoever added them; only the owner or the admin edits them.
-Failed slices stay, with why.
+folder, so nothing is moved or renamed. The images in its .mesc files and the ephys runs in .nwb files are read into
+tables of their own. Rows belong to whoever added them; only the owner or the admin edits them. Failed slices stay, with
+why.
 """
 
 import csv
+import io
 import posixpath
 import re
 import sqlite3
@@ -15,8 +17,11 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Optional
 
+import numpy as np
+
 from imgui_lab4_interface.config import data_dir
-from imgui_lab4_interface.storage import Storage
+from imgui_lab4_interface.rawdata import mesc_images, nwb_runs
+from imgui_lab4_interface.storage import Storage, download
 
 # bump when the tables change; an older file is renamed aside and the tables reseeded
 VERSION_SCHEMA = 3
@@ -133,6 +138,14 @@ CREATE TABLE IF NOT EXISTS assays (
 CREATE INDEX IF NOT EXISTS assays_slice ON assays (slice_id);
 CREATE TABLE IF NOT EXISTS files (path TEXT PRIMARY KEY, size INTEGER, mtime REAL);
 CREATE TABLE IF NOT EXISTS indexed (root TEXT PRIMARY KEY, indexed_at TEXT, storage TEXT);
+CREATE TABLE IF NOT EXISTS images (
+    name TEXT, size INTEGER, unit TEXT, taken TEXT, kind TEXT, method TEXT, objective TEXT, frames INTEGER,
+    height INTEGER, width INTEGER, comment TEXT, thumb BLOB, PRIMARY KEY (name, size, unit)
+);
+CREATE TABLE IF NOT EXISTS runs (
+    name TEXT, size INTEGER, sweep INTEGER, started TEXT, stimset TEXT, sweeps INTEGER, vm_mv REAL, rin_mohm REAL,
+    spikes INTEGER, PRIMARY KEY (name, size, sweep)
+);
 """
 
 # seed rows from Shobhana's file names; patient ids are placeholders
@@ -218,7 +231,7 @@ SEED_SLICES = [
         None,
         None,
         "2026-08-31 -day9 -egfp",
-        "ephys in SS_Ephys_HSlice_8-31-2026.pxp",
+        "",
     ),
     (
         "HS260831.egfp",
@@ -331,6 +344,11 @@ PATTERNS_DATE = (
 ISO = re.compile(r"\d{4}-\d\d-\d\d")
 
 
+def cached(path: str) -> Path:
+    """Where a copy of the BioHPC file path is kept to open or read it off the mount."""
+    return data_dir() / "cache" / path.lstrip("/")
+
+
 def can_edit(owner: str, user: str) -> bool:
     """Users edit their own rows; the admin edits every row."""
     return user == ADMIN or user == owner
@@ -387,8 +405,8 @@ def match_files(files: list[dict], pattern: str) -> list[dict]:
 
 class SliceDatabase:
     """
-    The patients, slices and assays tables, edited as a named user, and the file index under ROOT. Stored in
-    slices.sqlite in the data folder by default.
+    The patients, slices and assays tables, edited as a named user, the file index under ROOT, and the images and runs
+    read from its raw data. Stored in slices.sqlite in the data folder by default.
     """
 
     def __init__(self, path: Optional[Path] = None):
@@ -504,6 +522,81 @@ class SliceDatabase:
                 (ROOT, datetime.now().isoformat(timespec="seconds"), storage.label),
             )
         return self.files()
+
+    def read_data(
+        self, storage: Storage, files: list[dict], progress: dict
+    ) -> tuple[int, int]:
+        """
+        Read the images of each .mesc and the runs of each .nwb in files (index rows) into the images and runs tables,
+        replacing what an earlier read saved; a file off the mount is read from its cached copy, copied first when
+        missing. progress["done"] counts the files read. Returns the images and runs read.
+        """
+        n_images = n_runs = 0
+        for f in files:
+            remote = f"{ROOT}/{f['path']}"
+            name = posixpath.basename(remote)
+            progress["name"] = name
+            local = storage.local_path(remote)
+            if local is None:
+                local = cached(remote)
+                if not (local.is_file() and local.stat().st_size == f["size"]):
+                    download(storage, remote, local, {"done": 0})
+            if name.lower().endswith(".nwb"):
+                runs = nwb_runs(local)
+                with closing(self.connect()) as db, db:
+                    db.execute(
+                        "DELETE FROM runs WHERE name = ? AND size = ?",
+                        (name, f["size"]),
+                    )
+                    db.executemany(
+                        "INSERT INTO runs VALUES (:name, :size, :sweep, :started, :stimset, :sweeps, :vm_mv, :rin_mohm, :spikes)",
+                        [{**run, "name": name, "size": f["size"]} for run in runs],
+                    )
+                n_runs += len(runs)
+            else:
+                images = mesc_images(local)
+                with closing(self.connect()) as db, db:
+                    db.execute(
+                        "DELETE FROM images WHERE name = ? AND size = ?",
+                        (name, f["size"]),
+                    )
+                    for image in images:
+                        buffer = io.BytesIO()
+                        np.save(buffer, image["thumb"])
+                        db.execute(
+                            "INSERT INTO images VALUES (:name, :size, :unit, :taken, :kind, :method, :objective, :frames, :height, "
+                            ":width, :comment, :thumb)",
+                            {
+                                **image,
+                                "name": name,
+                                "size": f["size"],
+                                "thumb": buffer.getvalue(),
+                            },
+                        )
+                n_images += len(images)
+            progress["done"] += 1
+        return n_images, n_runs
+
+    def images(self) -> list[dict]:
+        """Every image read, in the order taken, its thumbnail an 8-bit array."""
+        with closing(self.connect()) as db:
+            rows = [
+                dict(row)
+                for row in db.execute("SELECT * FROM images ORDER BY taken, name, unit")
+            ]
+        for row in rows:
+            row["thumb"] = np.load(io.BytesIO(row["thumb"]))
+        return rows
+
+    def runs(self) -> list[dict]:
+        """Every ephys run read, in the order started."""
+        with closing(self.connect()) as db:
+            return [
+                dict(row)
+                for row in db.execute(
+                    "SELECT * FROM runs ORDER BY started, name, sweep"
+                )
+            ]
 
     def next_id(self, db: sqlite3.Connection, table: str, patient_id: str) -> str:
         """An unused patient id (H26.005), or slice id under patient_id (HS260727.S01)."""

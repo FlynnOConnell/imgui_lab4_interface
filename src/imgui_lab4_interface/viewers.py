@@ -5,6 +5,7 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 from imgui_lab4_interface.catalog import KINDS
 from imgui_lab4_interface.config import Settings, data_dir
@@ -16,11 +17,16 @@ FLAGS_DETACHED = (
 )
 
 
-def command(settings: Settings, kind: str, local: Path) -> list[str]:
-    """The command line that opens a dataset of kind at local, e.g. ["masknmf", "view", "<path>"]."""
+def command(
+    settings: Settings, kind: str, local: Path, unit: Optional[str] = None
+) -> list[str]:
+    """
+    The command line that opens a dataset of kind at local, e.g. ["masknmf", "view", "<path>"]; unit opens one unit of a
+    .mesc, e.g. "MSession_0/MUnit_3", where mbo would otherwise ask which.
+    """
     tool, args, _ = KINDS[kind]
     executable = settings.command_mbo if tool == "mbo" else settings.command_masknmf
-    return [executable, *args, str(local)]
+    return [executable, *args, str(local), *(["--unit", unit] if unit else [])]
 
 
 def launch(argv: list[str]) -> Path:
